@@ -68,7 +68,9 @@ def submit():
     db.commit()
     db.close()
     
-    return "<div style='text-align:center; margin-top:100px;'><h2 style='color:green;'>Thank you!</h2><p>Your inquiry has been received.</p><a href='/'>Home</a></div>"
+    return "<div style='text-align:center; margin-top:100px;'><h2 style='color:green;'>Thank you very much! Our team will contact you soon.
+
+</h2><p>Your inquiry has been received.</p><a href='/'>Home</a></div>"
 
 # 后台管理（必须账号：boss，密码：88888888）
 @app.route('/admin')
