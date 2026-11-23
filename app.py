@@ -68,7 +68,7 @@ def submit():
     db.commit()
     db.close()
     
-    return "<div style='text-align:center; margin-top:100px;'><h2 style='color:green;'>Thank you very much! Our team will contact you soon.
+    return "<div style='text-align:center; margin-top:100px;'><h2 style='color:green;'>BOSS VINCENT IS AWESOME!
 
 </h2><p>Your inquiry has been received.</p><a href='/'>Home</a></div>"
 
