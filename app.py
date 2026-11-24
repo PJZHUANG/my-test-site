@@ -73,6 +73,7 @@ def admin():
         
         # 后台页面也帮你重写了，用了现代一点点的样式
         html = """
+                html = """
         <html>
         <head>
             <title>QuarkTwin Admin</title>
@@ -80,15 +81,13 @@ def admin():
         </head>
         <body class="p-5 bg-light">
             <div class="container">
-                <h2 class="mb-4">Customer Inquiries</h2>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                    <h2 style="margin: 0;">Customer Inquiries</h2>
+                    <a href="/logout" style="background-color: #dc3545; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">🔒 LOG OUT</a>
+                </div>
                 <table class="table table-bordered table-hover bg-white shadow-sm">
                     <thead class="table-dark">
-                        <tr>
-                            <th>ID</th>
-                            <th>Name</th>
-                            <th>Email</th>
-                            <th>Message</th>
-                        </tr>
+                        <tr><th>ID</th><th>Name</th><th>Email</th><th>Message</th></tr>
                     </thead>
                     <tbody>
         """
