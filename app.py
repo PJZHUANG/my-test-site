@@ -3,9 +3,13 @@ import pymysql
 import os
 import pandas as pd
 from io import BytesIO
+import requests # 新增：用来调 AI 接口
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'top_secret_quarktwin_key_2026')
+
+# ⚠️ 把这里换成你刚才去 DeepSeek 申请的 sk- 开头的 API Key
+DEEPSEEK_API_KEY = os.environ.get('DEEPSEEK_API_KEY', '')
 
 def get_db():
     return pymysql.connect(
@@ -46,37 +50,74 @@ def logout():
     session.pop('logged_in', None)
     return redirect(url_for('login'))
 
-# ==========================================
-# 🚀 新增：一键导出 Excel 路由
-# ==========================================
 @app.route('/export')
 def export_excel():
     if not session.get('logged_in'):
         return redirect(url_for('login'))
-        
     try:
         db = get_db()
         cursor = db.cursor()
         cursor.execute("SELECT id, name, email, message FROM customers ORDER BY id DESC")
         rows = cursor.fetchall()
         db.close()
-        
-        # 用 pandas 把数据库数据转换成 Excel
         df = pd.DataFrame(rows, columns=['ID', 'Name', 'Email', 'Message'])
         output = BytesIO()
-        # 用 xlsxwriter 引擎导出带格式的 Excel
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
             df.to_excel(writer, index=False, sheet_name='Inquiries')
-        
         output.seek(0)
-        
-        # 生成下载响应
         response = make_response(output.getvalue())
         response.headers["Content-Disposition"] = "attachment; filename=customer_inquiries.xlsx"
         response.headers["Content-type"] = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         return response
     except Exception as e:
         return f"<h2>Export Error: {str(e)}</h2>", 500
+
+# ==========================================
+# 🚀 新增：AI 自动生成回复路由
+# ==========================================
+@app.route('/ai_reply/<int:customer_id>')
+def ai_reply(customer_id):
+    if not session.get('logged_in'):
+        return "Access Denied", 403
+        
+    try:
+        db = get_db()
+        cursor = db.cursor()
+        cursor.execute("SELECT name, message FROM customers WHERE id = %s", (customer_id,))
+        row = cursor.fetchone()
+        db.close()
+        
+        if not row:
+            return "Customer not found", 404
+            
+        customer_name, customer_message = row
+        
+        # 调用 DeepSeek AI
+        headers = {
+            "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        prompt = f"你是一家深圳顶尖电子元器件供应商（QuarkTwin）的外贸销售总监。请根据以下客户的询盘，写一封极其专业、热情的英文回复邮件。客户的留言是：'{customer_message}'。请直接输出邮件正文，不要任何废话。"
+        
+        data = {
+            "model": "deepseek-chat",
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.7
+        }
+        
+        response = requests.post("https://api.deepseek.com/chat/completions", headers=headers, json=data)
+        ai_content = response.json()['choices'][0]['message']['content']
+        
+        return f"""
+        <div style="font-family: Arial; padding: 50px;">
+            <h3>AI 生成的回复草稿 (给 {customer_name})：</h3>
+            <textarea style="width: 100%; height: 300px; padding: 20px; font-size: 16px;">{ai_content}</textarea>
+            <br><br>
+            <a href="/admin" style="padding: 10px 20px; background: #0d6efd; color: white; text-decoration: none; border-radius: 5px;">返回后台</a>
+        </div>
+        """
+    except Exception as e:
+        return f"<h2>AI Error: {str(e)}</h2>", 500
 
 @app.route('/admin')
 def admin():
@@ -101,18 +142,27 @@ def admin():
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                     <h2 style="margin: 0;">Customer Inquiries</h2>
                     <div>
-                        <a href="/export" style="background-color: #198754; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px; margin-right: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">📥 EXPORT EXCEL</a>
-                        <a href="/logout" style="background-color: #dc3545; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">🔒 LOG OUT</a>
+                        <a href="/export" style="background-color: #198754; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px; margin-right: 10px;">📥 EXPORT EXCEL</a>
+                        <a href="/logout" style="background-color: #dc3545; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px;">🔒 LOG OUT</a>
                     </div>
                 </div>
                 <table class="table table-bordered table-hover bg-white shadow-sm">
                     <thead class="table-dark">
-                        <tr><th>ID</th><th>Name</th><th>Email</th><th>Message</th></tr>
+                        <tr><th>ID</th><th>Name</th><th>Email</th><th>Message</th><th>操作</th></tr>
                     </thead>
                     <tbody>
         """
         for row in rows:
-            html += f"<tr><td>{row[0]}</td><td>{row[1]}</td><td>{row[2]}</td><td>{row[3]}</td></tr>"
+            # 在表格最后加一个 AI 按钮
+            html += f"""
+            <tr>
+                <td>{row[0]}</td>
+                <td>{row[1]}</td>
+                <td>{row[2]}</td>
+                <td>{row[3]}</td>
+                <td><a href="/ai_reply/{row[0]}" style="background-color: #6f42c1; color: white; padding: 5px 10px; text-decoration: none; border-radius: 4px; font-size: 14px;">🤖 AI 写回复</a></td>
+            </tr>
+            """
             
         html += """
                     </tbody>
