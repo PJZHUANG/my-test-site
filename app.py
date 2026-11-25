@@ -160,7 +160,7 @@ def admin():
                 <td>{row[1]}</td>
                 <td>{row[2]}</td>
                 <td>{row[3]}</td>
-                <td><a href="/ai_reply/{row[0]}" style="background-color: #6f42c1; color: white; padding: 5px 10px; text-decoration: none; border-radius: 4px; font-size: 14px;">🤖 AI 写回复</a></td>
+                <td><a href="/ai_reply/{row[0]}" style="background-color: #6f42c1; color: white; padding: 8px 15px; text-decoration: none; border-radius: 4px; font-size: 14px; white-space: nowrap; display: inline-block;">🤖 AI 写回复</a></td>
             </tr>
             """
             
