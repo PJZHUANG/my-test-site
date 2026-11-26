@@ -1,3 +1,4 @@
+import ssl
 from flask import Flask, request, render_template, redirect, url_for, session, make_response
 import pymysql
 import os
@@ -188,29 +189,30 @@ def send_email(customer_id):
         cursor = db.cursor()
         cursor.execute("SELECT email FROM customers WHERE id = %s", (customer_id,))
         row = cursor.fetchone()
+        
         if not row:
             return "Customer not found", 404
+            
         customer_email = row[0]
         msg = MIMEText(email_content, 'plain', 'utf-8')
         msg['Subject'] = Header('QuarkTwin - Regarding your inquiry', 'utf-8')
         msg['From'] = SMTP_USER
         msg['To'] = customer_email
-        import ssl
-# ... 在 send_email 函数内部 ...
-context = ssl.create_default_context()
-context.check_hostname = False
-context.verify_mode = ssl.CERT_NONE
-context.verify_flags &= ~ssl.VERIFY_X509_STRICT # 兼容严格模式
-
-server = smtplib.SMTP_SSL('smtp.qq.com', 465, context=context)
+        
+        # 🛡️ 救急护甲：忽略 SSL 证书验证，防止阿里云强杀连接
+        context = ssl._create_unverified_context()
+        server = smtplib.SMTP_SSL('smtp.qq.com', 465, context=context)
+        
         server.login(SMTP_USER, SMTP_PASS)
         server.sendmail(SMTP_USER, [customer_email], msg.as_string())
         server.quit()
+        
         cursor.execute("UPDATE customers SET status = 'Contacted' WHERE id = %s", (customer_id,))
         db.commit()
         db.close()
         return redirect(url_for('admin'))
     except Exception as e:
+        return f"<h2>Email Send Error: {str(e)}</h2>", 500
         return f"<h2>Email Send Error: {str(e)}</h2>", 500
 
 @app.route('/assign/<int:customer_id>/<username>')
