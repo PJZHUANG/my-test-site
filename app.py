@@ -195,7 +195,14 @@ def send_email(customer_id):
         msg['Subject'] = Header('QuarkTwin - Regarding your inquiry', 'utf-8')
         msg['From'] = SMTP_USER
         msg['To'] = customer_email
-        server = smtplib.SMTP_SSL('smtp.qq.com', 465)
+        import ssl
+# ... 在 send_email 函数内部 ...
+context = ssl.create_default_context()
+context.check_hostname = False
+context.verify_mode = ssl.CERT_NONE
+context.verify_flags &= ~ssl.VERIFY_X509_STRICT # 兼容严格模式
+
+server = smtplib.SMTP_SSL('smtp.qq.com', 465, context=context)
         server.login(SMTP_USER, SMTP_PASS)
         server.sendmail(SMTP_USER, [customer_email], msg.as_string())
         server.quit()
