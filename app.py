@@ -1,4 +1,3 @@
-import ssl
 from flask import Flask, request, render_template, redirect, url_for, session, make_response
 import pymysql
 import os
@@ -10,6 +9,9 @@ from email.mime.text import MIMEText
 from email.header import Header
 from werkzeug.utils import secure_filename
 import base64
+import ssl
+import time
+import json
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'top_secret_quarktwin_key_2026')
@@ -17,9 +19,9 @@ app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'top_secret_quarktwin_key_20
 DEEPSEEK_API_KEY = os.environ.get('DEEPSEEK_API_KEY', '')
 SMTP_USER = os.environ.get('SMTP_USER', '')
 SMTP_PASS = os.environ.get('SMTP_PASS', '')
-ZHIPU_API_KEY = os.environ.get('ZHIPU_API_KEY', '') # 新增：视觉模型API
+ZHIPU_API_KEY = os.environ.get('ZHIPU_API_KEY', '')
+WEBHOOK_URL = os.environ.get('WEBHOOK_URL', '') # 🚀 新增：微信报警器链接
 
-# 限制只能传图片
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg'}
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
@@ -39,13 +41,10 @@ def submit():
         message = request.form['message']
         
         image_url = ""
-        # 🛡️ 处理图片上传（带安全校验）
         if 'chip_image' in request.files:
             file = request.files['chip_image']
             if file and allowed_file(file.filename):
                 filename = secure_filename(file.filename)
-                # 防止同名文件覆盖，加上时间戳
-                import time
                 filename = str(int(time.time())) + "_" + filename
                 save_path = os.path.join('/var/www/html/static/uploads', filename)
                 file.save(save_path)
@@ -62,10 +61,25 @@ def submit():
             total = cursor.fetchone()[0]
             assigned_to = sales_users[total % len(sales_users)]
             
-        cursor.execute("INSERT INTO customers (name, email, message, assigned_to, image_url) VALUES (%s, %s, %s, %s, %s)", 
-                       (name, email, message, assigned_to, image_url))
+        cursor.execute("INSERT INTO customers (name, email, message, assigned_to, image_url) VALUES (%s, %s, %s, %s, %s)", (name, email, message, assigned_to, image_url))
         db.commit()
         db.close()
+
+        # 🚀 触发微信/钉钉实时警报
+        if WEBHOOK_URL:
+            try:
+                headers = {'Content-Type': 'application/json'}
+                # 企业微信 Markdown 格式
+                alert_data = {
+                    "msgtype": "markdown",
+                    "markdown": {
+                        "content": f"### 🚨 收到新外贸询盘！\n> **客户名字**：<font color=\"info\">{name}</font>\n> **客户邮箱**：{email}\n> **需求内容**：{message}\n> **自动分配给**：{assigned_to}\n\n[点击进入后台处理](https://pjzhuang.com/admin)"
+                    }
+                }
+                requests.post(WEBHOOK_URL, headers=headers, data=json.dumps(alert_data))
+            except Exception as e:
+                print("Webhook发送失败:", e)
+
         return "<div style='text-align:center; margin-top:100px;'><h2 style='color:green;'>Thank you! Inquiry received.</h2><a href='/'>Home</a></div>"
     except Exception as e:
         return f"<h2>Oops! Error: {str(e)}</h2>", 500
@@ -125,20 +139,17 @@ def ai_reply(customer_id):
         cursor.execute("SELECT name, email, message, image_url FROM customers WHERE id = %s", (customer_id,))
         row = cursor.fetchone()
         db.close()
-        
         if not row:
             return "Customer not found", 404
             
         customer_name, customer_email, customer_message, image_url = row
-        
         image_context = ""
-        # 🚀 如果有图片，先用视觉大模型分析
+        
         if image_url:
             image_path = "/var/www/html" + image_url
             if os.path.exists(image_path):
                 with open(image_path, "rb") as img_file:
                     base64_image = base64.b64encode(img_file.read()).decode('utf-8')
-                
                 headers_vision = {"Authorization": f"Bearer {ZHIPU_API_KEY}", "Content-Type": "application/json"}
                 data_vision = {
                     "model": "glm-4v",
@@ -150,13 +161,11 @@ def ai_reply(customer_id):
                         ]
                     }]
                 }
-                # 调用智谱视觉模型
                 res_vision = requests.post("https://open.bigmodel.cn/api/paas/v4/chat/completions", headers=headers_vision, json=data_vision)
                 vision_result = res_vision.json().get('choices', [{}])[0].get('message', {}).get('content', '')
                 if vision_result:
-                    image_context = f"\n(注意：客户还上传了图片，AI识别图片中的芯片型号为：{vision_result})"
+                    image_context = f"\n(注意：客户上传了图片，AI识别图片中的芯片型号为：{vision_result})"
 
-        # 然后让 DeepSeek 结合文字和图片识别结果写回复
         headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
         prompt = f"你是一家深圳顶尖电子元器件供应商（QuarkTwin）的外贸销售总监。客户留言：'{customer_message}'。{image_context}。请据此写一封英文回复邮件，体现我们的专业度，并顺便给个大概报价区间。直接输出邮件正文。"
         data = {"model": "deepseek-chat", "messages": [{"role": "user", "content": prompt}], "temperature": 0.7}
@@ -189,30 +198,26 @@ def send_email(customer_id):
         cursor = db.cursor()
         cursor.execute("SELECT email FROM customers WHERE id = %s", (customer_id,))
         row = cursor.fetchone()
-        
         if not row:
             return "Customer not found", 404
-            
         customer_email = row[0]
         msg = MIMEText(email_content, 'plain', 'utf-8')
         msg['Subject'] = Header('QuarkTwin - Regarding your inquiry', 'utf-8')
         msg['From'] = SMTP_USER
         msg['To'] = customer_email
         
-        # 🛡️ 救急护甲：忽略 SSL 证书验证，防止阿里云强杀连接
+        # 兼容网易企业邮箱
         context = ssl._create_unverified_context()
         server = smtplib.SMTP_SSL('smtp.qiye.163.com', 465, context=context)
         
         server.login(SMTP_USER, SMTP_PASS)
         server.sendmail(SMTP_USER, [customer_email], msg.as_string())
         server.quit()
-        
         cursor.execute("UPDATE customers SET status = 'Contacted' WHERE id = %s", (customer_id,))
         db.commit()
         db.close()
         return redirect(url_for('admin'))
     except Exception as e:
-        return f"<h2>Email Send Error: {str(e)}</h2>", 500
         return f"<h2>Email Send Error: {str(e)}</h2>", 500
 
 @app.route('/assign/<int:customer_id>/<username>')
@@ -322,7 +327,6 @@ def admin():
 
             action_btn = f'<a href="/ai_reply/{row[0]}" style="background-color: #6f42c1; color: white; padding: 6px 12px; text-decoration: none; border-radius: 4px; font-size: 14px; white-space: nowrap; display: inline-block;">🤖 AI 写回复</a>'
             
-            # 如果有图片，就在留言下面显示一个小缩略图
             image_thumb = f'<br><a href="{row[6]}" target="_blank"><img src="{row[6]}" style="max-height: 50px; border-radius: 4px; margin-top: 5px;"></a>' if row[6] else ''
             
             html += f"""
