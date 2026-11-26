@@ -28,9 +28,22 @@ def submit():
         name = request.form['name']
         email = request.form['email']
         message = request.form['message']
+        
         db = get_db()
         cursor = db.cursor()
-        cursor.execute("INSERT INTO customers (name, email, message) VALUES (%s, %s, %s)", (name, email, message))
+        
+        # 🚀 自动派单逻辑：查询所有业务员，按 ID 轮流分配
+        cursor.execute("SELECT username FROM users WHERE role = 'sales' ORDER BY id")
+        sales_users = [u[0] for u in cursor.fetchall()]
+        
+        assigned_to = 'Unassigned'
+        if sales_users:
+            # 查一下现在的总客户数，用来做取模运算
+            cursor.execute("SELECT COUNT(*) FROM customers")
+            total_customers = cursor.fetchone()[0]
+            assigned_to = sales_users[total_customers % len(sales_users)]
+            
+        cursor.execute("INSERT INTO customers (name, email, message, assigned_to) VALUES (%s, %s, %s, %s)", (name, email, message, assigned_to))
         db.commit()
         db.close()
         return "<div style='text-align:center; margin-top:100px;'><h2 style='color:green;'>Thank you! Inquiry received.</h2><a href='/'>Home</a></div>"
@@ -142,7 +155,6 @@ def send_email(customer_id):
     except Exception as e:
         return f"<h2>Email Send Error: {str(e)}</h2>", 500
 
-# 🚀 新增：指派业务员路由
 @app.route('/assign/<int:customer_id>/<username>')
 def assign(customer_id, username):
     if not session.get('logged_in') or session.get('role') != 'boss':
@@ -154,7 +166,6 @@ def assign(customer_id, username):
     db.close()
     return redirect(url_for('admin'))
 
-# 🚀 新增：修改客户状态路由
 @app.route('/update_status/<int:customer_id>/<status>')
 def update_status(customer_id, status):
     if not session.get('logged_in'):
@@ -175,7 +186,6 @@ def admin():
         db = get_db()
         cursor = db.cursor()
         
-        # 业务员只能看到指派给自己的，老板能看到所有
         if session.get('role') == 'boss':
             cursor.execute("SELECT id, name, email, message, status, assigned_to FROM customers ORDER BY id DESC")
         else:
@@ -183,7 +193,15 @@ def admin():
             
         rows = cursor.fetchall()
         
-        # 获取所有业务员的名字，供老板下拉菜单分配
+        # 🚀 数据大屏：统计看板（只统计当前用户能看到的数据）
+        cursor.execute("SELECT status, COUNT(*) FROM customers GROUP BY status")
+        status_counts = dict(cursor.fetchall())
+        pending_count = status_counts.get('Pending', 0)
+        contacted_count = status_counts.get('Contacted', 0)
+        quoted_count = status_counts.get('Quoted', 0)
+        closed_count = status_counts.get('Closed', 0)
+        total_count = len(rows)
+        
         cursor.execute("SELECT username FROM users WHERE role = 'sales'")
         sales_users = [u[0] for u in cursor.fetchall()]
         db.close()
@@ -198,6 +216,8 @@ def admin():
         </head>
         <body class="p-5 bg-light">
             <div class="container">
+                
+                <!-- 顶部控制栏 -->
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                     <h2 style="margin: 0;">Welcome, {session.get('username')} ({session.get('role')})</h2>
                     <div>
@@ -205,6 +225,41 @@ def admin():
                         <a href="/logout" style="background-color: #dc3545; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px;">🔒 LOG OUT</a>
                     </div>
                 </div>
+
+                <!-- 🚀 数据大屏统计卡片 -->
+                <div class="row mb-4">
+                    <div class="col-md-2">
+                        <div class="card bg-primary text-white text-center p-3 shadow-sm">
+                            <h5>总询盘</h5>
+                            <h2 class="mb-0">{total_count}</h2>
+                        </div>
+                    </div>
+                    <div class="col-md-2">
+                        <div class="card bg-warning text-dark text-center p-3 shadow-sm">
+                            <h5>待处理</h5>
+                            <h2 class="mb-0">{pending_count}</h2>
+                        </div>
+                    </div>
+                    <div class="col-md-2">
+                        <div class="card bg-info text-dark text-center p-3 shadow-sm">
+                            <h5>已联系</h5>
+                            <h2 class="mb-0">{contacted_count}</h2>
+                        </div>
+                    </div>
+                    <div class="col-md-2">
+                        <div class="card bg-secondary text-white text-center p-3 shadow-sm">
+                            <h5>已报价</h5>
+                            <h2 class="mb-0">{quoted_count}</h2>
+                        </div>
+                    </div>
+                    <div class="col-md-2">
+                        <div class="card bg-success text-white text-center p-3 shadow-sm">
+                            <h5>已成交</h5>
+                            <h2 class="mb-0">{closed_count}</h2>
+                        </div>
+                    </div>
+                </div>
+
                 <table class="table table-bordered table-hover bg-white shadow-sm align-middle">
                     <thead class="table-dark">
                         <tr><th>ID</th><th>Name</th><th>Email</th><th>Message</th><th>负责人</th><th>状态流转</th><th>AI 操作</th></tr>
@@ -212,7 +267,6 @@ def admin():
                     <tbody>
         """
         for row in rows:
-            # 渲染状态下拉框
             status = row[4]
             status_html = f"""
             <select onchange="window.location.href='/update_status/{row[0]}/'+this.value" class="form-select form-select-sm">
@@ -223,7 +277,6 @@ def admin():
             </select>
             """
             
-            # 渲染负责人分配
             assigned = row[5]
             if session.get('role') == 'boss':
                 options = ''.join([f"<option value='{u}' {'selected' if assigned==u else ''}>{u}</option>" for u in sales_users])
