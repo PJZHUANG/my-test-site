@@ -377,4 +377,4 @@ def shop():
     except Exception as e:
         return f"<h2>Shop Error: {str(e)}</h2>", 500 
         if __name__ == '__main__':
-    app.run()
+            app.run()
