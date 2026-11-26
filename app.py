@@ -201,7 +201,7 @@ def send_email(customer_id):
         
         # 🛡️ 救急护甲：忽略 SSL 证书验证，防止阿里云强杀连接
         context = ssl._create_unverified_context()
-        server = smtplib.SMTP_SSL('smtp.qq.com', 465, context=context)
+        server = smtplib.SMTP_SSL('smtp.qiye.163.com', 465, context=context)
         
         server.login(SMTP_USER, SMTP_PASS)
         server.sendmail(SMTP_USER, [customer_email], msg.as_string())
