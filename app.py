@@ -42,17 +42,15 @@ def login():
     if request.method == 'POST':
         username = request.form['username']
         password = request.form['password']
-        
         db = get_db()
         cursor = db.cursor()
         cursor.execute("SELECT id, username, role FROM users WHERE username=%s AND password=%s", (username, password))
         user = cursor.fetchone()
         db.close()
-        
         if user:
             session['logged_in'] = True
             session['username'] = user[1]
-            session['role'] = user[2]  # 记录角色
+            session['role'] = user[2]
             return redirect(url_for('admin'))
         return "<h3>Invalid credentials! <a href='/login'>Try again</a></h3>"
     return render_template('login.html')
@@ -62,22 +60,17 @@ def logout():
     session.clear()
     return redirect(url_for('login'))
 
-# 权限装饰器：只有老板能导出
 @app.route('/export')
 def export_excel():
-    if not session.get('logged_in'):
-        return redirect(url_for('login'))
-    # 🛡️ 核心安全拦截
-    if session.get('role') != 'boss':
-        return "<h2 style='color:red; text-align:center; margin-top:50px;'>Access Denied! Only the Boss can export data.</h2>", 403
-        
+    if not session.get('logged_in') or session.get('role') != 'boss':
+        return "Access Denied", 403
     try:
         db = get_db()
         cursor = db.cursor()
-        cursor.execute("SELECT id, name, email, message, status FROM customers ORDER BY id DESC")
+        cursor.execute("SELECT id, name, email, message, status, assigned_to FROM customers ORDER BY id DESC")
         rows = cursor.fetchall()
         db.close()
-        df = pd.DataFrame(rows, columns=['ID', 'Name', 'Email', 'Message', 'Status'])
+        df = pd.DataFrame(rows, columns=['ID', 'Name', 'Email', 'Message', 'Status', 'Assigned To'])
         output = BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
             df.to_excel(writer, index=False, sheet_name='Inquiries')
@@ -99,18 +92,14 @@ def ai_reply(customer_id):
         cursor.execute("SELECT name, email, message FROM customers WHERE id = %s", (customer_id,))
         row = cursor.fetchone()
         db.close()
-        
         if not row:
             return "Customer not found", 404
-            
         customer_name, customer_email, customer_message = row
         headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
         prompt = f"你是一家深圳顶尖电子元器件供应商（QuarkTwin）的外贸销售总监。请针对客户的留言写一封英文回复邮件。客户留言：'{customer_message}'。请直接输出邮件正文，不要任何废话。"
         data = {"model": "deepseek-chat", "messages": [{"role": "user", "content": prompt}], "temperature": 0.7}
-        
         response = requests.post("https://api.deepseek.com/chat/completions", headers=headers, json=data)
         ai_content = response.json()['choices'][0]['message']['content']
-        
         return f"""
         <div style="font-family: Arial; padding: 50px; max-width: 800px; margin: 0 auto;">
             <h3>AI 生成的回复草稿 (发给 {customer_email})：</h3>
@@ -135,27 +124,47 @@ def send_email(customer_id):
         cursor = db.cursor()
         cursor.execute("SELECT email FROM customers WHERE id = %s", (customer_id,))
         row = cursor.fetchone()
-        
         if not row:
             return "Customer not found", 404
-            
         customer_email = row[0]
         msg = MIMEText(email_content, 'plain', 'utf-8')
         msg['Subject'] = Header('QuarkTwin - Regarding your inquiry', 'utf-8')
         msg['From'] = SMTP_USER
         msg['To'] = customer_email
-        
         server = smtplib.SMTP_SSL('smtp.qq.com', 465)
         server.login(SMTP_USER, SMTP_PASS)
         server.sendmail(SMTP_USER, [customer_email], msg.as_string())
         server.quit()
-        
-        cursor.execute("UPDATE customers SET status = 'Replied' WHERE id = %s", (customer_id,))
+        cursor.execute("UPDATE customers SET status = 'Contacted' WHERE id = %s", (customer_id,))
         db.commit()
         db.close()
         return redirect(url_for('admin'))
     except Exception as e:
         return f"<h2>Email Send Error: {str(e)}</h2>", 500
+
+# 🚀 新增：指派业务员路由
+@app.route('/assign/<int:customer_id>/<username>')
+def assign(customer_id, username):
+    if not session.get('logged_in') or session.get('role') != 'boss':
+        return "Only Boss can assign", 403
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute("UPDATE customers SET assigned_to = %s WHERE id = %s", (username, customer_id))
+    db.commit()
+    db.close()
+    return redirect(url_for('admin'))
+
+# 🚀 新增：修改客户状态路由
+@app.route('/update_status/<int:customer_id>/<status>')
+def update_status(customer_id, status):
+    if not session.get('logged_in'):
+        return "Access Denied", 403
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute("UPDATE customers SET status = %s WHERE id = %s", (status, customer_id))
+    db.commit()
+    db.close()
+    return redirect(url_for('admin'))
 
 @app.route('/admin')
 def admin():
@@ -165,11 +174,20 @@ def admin():
     try:
         db = get_db()
         cursor = db.cursor()
-        cursor.execute("SELECT id, name, email, message, status FROM customers ORDER BY id DESC")
+        
+        # 业务员只能看到指派给自己的，老板能看到所有
+        if session.get('role') == 'boss':
+            cursor.execute("SELECT id, name, email, message, status, assigned_to FROM customers ORDER BY id DESC")
+        else:
+            cursor.execute("SELECT id, name, email, message, status, assigned_to FROM customers WHERE assigned_to = %s ORDER BY id DESC", (session.get('username'),))
+            
         rows = cursor.fetchall()
+        
+        # 获取所有业务员的名字，供老板下拉菜单分配
+        cursor.execute("SELECT username FROM users WHERE role = 'sales'")
+        sales_users = [u[0] for u in cursor.fetchall()]
         db.close()
         
-        # 根据登录用户的角色，动态生成顶部按钮
         export_btn = '<a href="/export" style="background-color: #198754; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px; margin-right: 10px;">📥 EXPORT EXCEL</a>' if session.get('role') == 'boss' else ''
         
         html = f"""
@@ -187,15 +205,38 @@ def admin():
                         <a href="/logout" style="background-color: #dc3545; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px;">🔒 LOG OUT</a>
                     </div>
                 </div>
-                <table class="table table-bordered table-hover bg-white shadow-sm">
+                <table class="table table-bordered table-hover bg-white shadow-sm align-middle">
                     <thead class="table-dark">
-                        <tr><th>ID</th><th>Name</th><th>Email</th><th>Message</th><th>状态</th><th>操作</th></tr>
+                        <tr><th>ID</th><th>Name</th><th>Email</th><th>Message</th><th>负责人</th><th>状态流转</th><th>AI 操作</th></tr>
                     </thead>
                     <tbody>
         """
         for row in rows:
-            status_badge = '<span class="badge bg-success">Replied</span>' if row[4] == 'Replied' else '<span class="badge bg-warning text-dark">Pending</span>'
-            action_btn = f'<a href="/ai_reply/{row[0]}" style="background-color: #6f42c1; color: white; padding: 8px 15px; text-decoration: none; border-radius: 4px; font-size: 14px; white-space: nowrap; display: inline-block;">🤖 AI 写回复</a>' if row[4] != 'Replied' else ''
+            # 渲染状态下拉框
+            status = row[4]
+            status_html = f"""
+            <select onchange="window.location.href='/update_status/{row[0]}/'+this.value" class="form-select form-select-sm">
+                <option value="Pending" {'selected' if status=='Pending' else ''}>Pending</option>
+                <option value="Contacted" {'selected' if status=='Contacted' else ''}>Contacted</option>
+                <option value="Quoted" {'selected' if status=='Quoted' else ''}>Quoted</option>
+                <option value="Closed" {'selected' if status=='Closed' else ''}>Closed</option>
+            </select>
+            """
+            
+            # 渲染负责人分配
+            assigned = row[5]
+            if session.get('role') == 'boss':
+                options = ''.join([f"<option value='{u}' {'selected' if assigned==u else ''}>{u}</option>" for u in sales_users])
+                assigned_html = f"""
+                <select onchange="window.location.href='/assign/{row[0]}/'+this.value" class="form-select form-select-sm">
+                    <option value="Unassigned" {'selected' if assigned=='Unassigned' else ''}>Unassigned</option>
+                    {options}
+                </select>
+                """
+            else:
+                assigned_html = f"<span class='badge bg-info text-dark'>{assigned}</span>"
+
+            action_btn = f'<a href="/ai_reply/{row[0]}" style="background-color: #6f42c1; color: white; padding: 6px 12px; text-decoration: none; border-radius: 4px; font-size: 14px; white-space: nowrap; display: inline-block;">🤖 AI 写回复</a>'
             
             html += f"""
             <tr>
@@ -203,7 +244,8 @@ def admin():
                 <td>{row[1]}</td>
                 <td>{row[2]}</td>
                 <td>{row[3]}</td>
-                <td>{status_badge}</td>
+                <td>{assigned_html}</td>
+                <td>{status_html}</td>
                 <td>{action_btn}</td>
             </tr>
             """
