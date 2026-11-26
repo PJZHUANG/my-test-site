@@ -11,15 +11,12 @@ from email.header import Header
 app = Flask(__name__)
 app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'top_secret_quarktwin_key_2026')
 
-# 从服务器环境变量读取（绝不在代码里写死）
 DEEPSEEK_API_KEY = os.environ.get('DEEPSEEK_API_KEY', '')
 SMTP_USER = os.environ.get('SMTP_USER', '')
 SMTP_PASS = os.environ.get('SMTP_PASS', '')
 
 def get_db():
-    return pymysql.connect(
-        host='localhost', user='appuser', password='Bta3456789', database='quarktwin_crm', charset='utf8mb4'
-    )
+    return pymysql.connect(host='localhost', user='appuser', password='Bta3456789', database='quarktwin_crm', charset='utf8mb4')
 
 @app.route('/')
 def index():
@@ -33,8 +30,7 @@ def submit():
         message = request.form['message']
         db = get_db()
         cursor = db.cursor()
-        sql = "INSERT INTO customers (name, email, message) VALUES (%s, %s, %s)"
-        cursor.execute(sql, (name, email, message))
+        cursor.execute("INSERT INTO customers (name, email, message) VALUES (%s, %s, %s)", (name, email, message))
         db.commit()
         db.close()
         return "<div style='text-align:center; margin-top:100px;'><h2 style='color:green;'>Thank you! Inquiry received.</h2><a href='/'>Home</a></div>"
@@ -44,21 +40,37 @@ def submit():
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
-        if request.form['username'] == 'boss' and request.form['password'] == '88888888':
+        username = request.form['username']
+        password = request.form['password']
+        
+        db = get_db()
+        cursor = db.cursor()
+        cursor.execute("SELECT id, username, role FROM users WHERE username=%s AND password=%s", (username, password))
+        user = cursor.fetchone()
+        db.close()
+        
+        if user:
             session['logged_in'] = True
+            session['username'] = user[1]
+            session['role'] = user[2]  # 记录角色
             return redirect(url_for('admin'))
         return "<h3>Invalid credentials! <a href='/login'>Try again</a></h3>"
     return render_template('login.html')
 
 @app.route('/logout')
 def logout():
-    session.pop('logged_in', None)
+    session.clear()
     return redirect(url_for('login'))
 
+# 权限装饰器：只有老板能导出
 @app.route('/export')
 def export_excel():
     if not session.get('logged_in'):
         return redirect(url_for('login'))
+    # 🛡️ 核心安全拦截
+    if session.get('role') != 'boss':
+        return "<h2 style='color:red; text-align:center; margin-top:50px;'>Access Denied! Only the Boss can export data.</h2>", 403
+        
     try:
         db = get_db()
         cursor = db.cursor()
@@ -77,7 +89,6 @@ def export_excel():
     except Exception as e:
         return f"<h2>Export Error: {str(e)}</h2>", 500
 
-# 1. 生成 AI 回复
 @app.route('/ai_reply/<int:customer_id>')
 def ai_reply(customer_id):
     if not session.get('logged_in'):
@@ -93,7 +104,6 @@ def ai_reply(customer_id):
             return "Customer not found", 404
             
         customer_name, customer_email, customer_message = row
-        
         headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
         prompt = f"你是一家深圳顶尖电子元器件供应商（QuarkTwin）的外贸销售总监。请针对客户的留言写一封英文回复邮件。客户留言：'{customer_message}'。请直接输出邮件正文，不要任何废话。"
         data = {"model": "deepseek-chat", "messages": [{"role": "user", "content": prompt}], "temperature": 0.7}
@@ -101,7 +111,6 @@ def ai_reply(customer_id):
         response = requests.post("https://api.deepseek.com/chat/completions", headers=headers, json=data)
         ai_content = response.json()['choices'][0]['message']['content']
         
-        # 把 AI 生成的内容放进表单，准备发送
         return f"""
         <div style="font-family: Arial; padding: 50px; max-width: 800px; margin: 0 auto;">
             <h3>AI 生成的回复草稿 (发给 {customer_email})：</h3>
@@ -116,7 +125,6 @@ def ai_reply(customer_id):
     except Exception as e:
         return f"<h2>AI Error: {str(e)}</h2>", 500
 
-# 2. 真实发送邮件
 @app.route('/send_email/<int:customer_id>', methods=['POST'])
 def send_email(customer_id):
     if not session.get('logged_in'):
@@ -132,24 +140,19 @@ def send_email(customer_id):
             return "Customer not found", 404
             
         customer_email = row[0]
-        
-        # 发送邮件逻辑
         msg = MIMEText(email_content, 'plain', 'utf-8')
         msg['Subject'] = Header('QuarkTwin - Regarding your inquiry', 'utf-8')
         msg['From'] = SMTP_USER
         msg['To'] = customer_email
         
-        # QQ邮箱通常用 smtp.qq.com，163用 smtp.163.com
         server = smtplib.SMTP_SSL('smtp.qq.com', 465)
         server.login(SMTP_USER, SMTP_PASS)
         server.sendmail(SMTP_USER, [customer_email], msg.as_string())
         server.quit()
         
-        # 更新数据库状态为已回复
         cursor.execute("UPDATE customers SET status = 'Replied' WHERE id = %s", (customer_id,))
         db.commit()
         db.close()
-        
         return redirect(url_for('admin'))
     except Exception as e:
         return f"<h2>Email Send Error: {str(e)}</h2>", 500
@@ -158,6 +161,7 @@ def send_email(customer_id):
 def admin():
     if not session.get('logged_in'):
         return redirect(url_for('login'))
+        
     try:
         db = get_db()
         cursor = db.cursor()
@@ -165,7 +169,10 @@ def admin():
         rows = cursor.fetchall()
         db.close()
         
-        html = """
+        # 根据登录用户的角色，动态生成顶部按钮
+        export_btn = '<a href="/export" style="background-color: #198754; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px; margin-right: 10px;">📥 EXPORT EXCEL</a>' if session.get('role') == 'boss' else ''
+        
+        html = f"""
         <html>
         <head>
             <title>QuarkTwin Admin</title>
@@ -174,9 +181,9 @@ def admin():
         <body class="p-5 bg-light">
             <div class="container">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                    <h2 style="margin: 0;">Customer Inquiries</h2>
+                    <h2 style="margin: 0;">Welcome, {session.get('username')} ({session.get('role')})</h2>
                     <div>
-                        <a href="/export" style="background-color: #198754; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px; margin-right: 10px;">📥 EXPORT EXCEL</a>
+                        {export_btn}
                         <a href="/logout" style="background-color: #dc3545; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px;">🔒 LOG OUT</a>
                     </div>
                 </div>
