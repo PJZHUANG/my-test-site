@@ -94,6 +94,13 @@
     <input class="form-control form-control-lg" type="file" name="chip_image" accept="image/*">
 </div>
                                 </div>
+                                                        <div class="mb-3">
+                            <label class="form-label">Security Check: What is {{ num1 }} + {{ num2 }}?</label>
+                            <input type="number" class="form-control form-control-lg" name="captcha" required placeholder="Enter the answer">
+                            {% if error %}
+                                <div style="color:red; margin-top:5px;">{{ error }}</div>
+                            {% endif %}
+                        </div>
                                 <button type="submit" class="btn btn-primary btn-lg w-100">Submit Inquiry</button>
                             </form>
                         </div>

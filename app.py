@@ -12,6 +12,7 @@ import base64
 import ssl
 import time
 import json
+import random
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'top_secret_quarktwin_key_2026')
@@ -20,7 +21,7 @@ DEEPSEEK_API_KEY = os.environ.get('DEEPSEEK_API_KEY', '')
 SMTP_USER = os.environ.get('SMTP_USER', '')
 SMTP_PASS = os.environ.get('SMTP_PASS', '')
 ZHIPU_API_KEY = os.environ.get('ZHIPU_API_KEY', '')
-WEBHOOK_URL = os.environ.get('WEBHOOK_URL', '') # 🚀 新增：微信报警器链接
+WEBHOOK_URL = os.environ.get('WEBHOOK_URL', '')
 
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg'}
 def allowed_file(filename):
@@ -29,13 +30,25 @@ def allowed_file(filename):
 def get_db():
     return pymysql.connect(host='localhost', user='appuser', password='Bta3456789', database='quarktwin_crm', charset='utf8mb4')
 
+# 🛡️ 防黑客：生成随机数学题
 @app.route('/')
 def index():
-    return render_template('index.html')
+    num1 = random.randint(1, 10)
+    num2 = random.randint(1, 10)
+    session['captcha_answer'] = num1 + num2
+    return render_template('index.html', num1=num1, num2=num2, error=None)
 
 @app.route('/submit', methods=['POST'])
 def submit():
     try:
+        # 🛡️ 验证码拦截
+        user_answer = request.form.get('captcha', type=int)
+        if user_answer != session.get('captcha_answer'):
+            num1 = random.randint(1, 10)
+            num2 = random.randint(1, 10)
+            session['captcha_answer'] = num1 + num2
+            return render_template('index.html', num1=num1, num2=num2, error="Security Check Failed! Please try again.")
+            
         name = request.form['name']
         email = request.form['email']
         message = request.form['message']
@@ -65,20 +78,12 @@ def submit():
         db.commit()
         db.close()
 
-        # 🚀 触发微信/钉钉实时警报
+        # 微信报警
         if WEBHOOK_URL:
             try:
-                headers = {'Content-Type': 'application/json'}
-                # 企业微信 Markdown 格式
-                alert_data = {
-                    "msgtype": "markdown",
-                    "markdown": {
-                        "content": f"### 🚨 收到新外贸询盘！\n> **客户名字**：<font color=\"info\">{name}</font>\n> **客户邮箱**：{email}\n> **需求内容**：{message}\n> **自动分配给**：{assigned_to}\n\n[点击进入后台处理](https://pjzhuang.com/admin)"
-                    }
-                }
-                requests.post(WEBHOOK_URL, headers=headers, data=json.dumps(alert_data))
-            except Exception as e:
-                print("Webhook发送失败:", e)
+                alert_data = {"msgtype": "markdown", "markdown": {"content": f"### 🚨 新询盘！\n> **客户**：{name}\n> **邮箱**：{email}\n> **需求**：{message}\n> **负责**：{assigned_to}"}}
+                requests.post(WEBHOOK_URL, json=alert_data)
+            except: pass
 
         return "<div style='text-align:center; margin-top:100px;'><h2 style='color:green;'>Thank you! Inquiry received.</h2><a href='/'>Home</a></div>"
     except Exception as e:
@@ -138,6 +143,12 @@ def ai_reply(customer_id):
         cursor = db.cursor()
         cursor.execute("SELECT name, email, message, image_url FROM customers WHERE id = %s", (customer_id,))
         row = cursor.fetchone()
+        
+        # 🚀 查数据库产品库，给 AI 提供真实的报价弹药
+        cursor.execute("SELECT model, brand, price FROM products")
+        products = cursor.fetchall()
+        product_list = "\n".join([f"- {p[0]} ({p[1]}): 成本价 ${p[2]}" for p in products])
+        
         db.close()
         if not row:
             return "Customer not found", 404
@@ -156,7 +167,7 @@ def ai_reply(customer_id):
                     "messages": [{
                         "role": "user",
                         "content": [
-                            {"type": "text", "text": "仔细看这张图片，如果里面是电子元器件或电路板，请提取出图中的芯片型号、品牌丝印。直接输出识别结果，不要废话。"},
+                            {"type": "text", "text": "仔细看这张图片，提取出图中的芯片型号。直接输出型号，不要废话。"},
                             {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
                         ]
                     }]
@@ -164,19 +175,23 @@ def ai_reply(customer_id):
                 res_vision = requests.post("https://open.bigmodel.cn/api/paas/v4/chat/completions", headers=headers_vision, json=data_vision)
                 vision_result = res_vision.json().get('choices', [{}])[0].get('message', {}).get('content', '')
                 if vision_result:
-                    image_context = f"\n(注意：客户上传了图片，AI识别图片中的芯片型号为：{vision_result})"
+                    image_context = f"\n(注意：客户图片识别的芯片型号为：{vision_result})"
 
         headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
-        prompt = f"你是一家深圳顶尖电子元器件供应商（QuarkTwin）的外贸销售总监。客户留言：'{customer_message}'。{image_context}。请据此写一封英文回复邮件，体现我们的专业度，并顺便给个大概报价区间。直接输出邮件正文。"
-        data = {"model": "deepseek-chat", "messages": [{"role": "user", "content": prompt}], "temperature": 0.7}
+        # 🚀 提示词升级：引入产品库，让 AI 自己算利润报价
+        prompt = f"""你是QuarkTwin的外贸销售总监。客户留言：'{customer_message}'。{image_context}。
+        我们公司的内部产品库如下（包含成本价，仅供你参考算利润，绝不要泄露成本价）：
+        {product_list}
+        请据此写一封英文回复邮件。如果客户问的型号在库中，请按 1.3 倍到 1.5 倍的利润空间给出对外报价；如果不在库中，就表示会尽快核算。直接输出邮件正文。"""
         
+        data = {"model": "deepseek-chat", "messages": [{"role": "user", "content": prompt}], "temperature": 0.7}
         response = requests.post("https://api.deepseek.com/chat/completions", headers=headers, json=data)
         ai_content = response.json()['choices'][0]['message']['content']
         
         return f"""
         <div style="font-family: Arial; padding: 50px; max-width: 800px; margin: 0 auto;">
             <h3>AI 生成的回复草稿 (发给 {customer_email})：</h3>
-            {f'<p><strong>客户上传的图片：</strong><br><img src="{image_url}" style="max-width: 300px; border-radius: 8px;"></p>' if image_url else ''}
+            {f'<p><strong>客户图片：</strong><br><img src="{image_url}" style="max-width: 300px; border-radius: 8px;"></p>' if image_url else ''}
             <form action="/send_email/{customer_id}" method="POST">
                 <textarea name="email_content" style="width: 100%; height: 300px; padding: 20px; font-size: 16px; border-radius: 8px; border: 1px solid #ccc;">{ai_content}</textarea>
                 <br><br>
@@ -206,13 +221,12 @@ def send_email(customer_id):
         msg['From'] = SMTP_USER
         msg['To'] = customer_email
         
-        # 兼容网易企业邮箱
         context = ssl._create_unverified_context()
         server = smtplib.SMTP_SSL('smtp.qiye.163.com', 465, context=context)
-        
         server.login(SMTP_USER, SMTP_PASS)
         server.sendmail(SMTP_USER, [customer_email], msg.as_string())
         server.quit()
+        
         cursor.execute("UPDATE customers SET status = 'Contacted' WHERE id = %s", (customer_id,))
         db.commit()
         db.close()
@@ -260,9 +274,9 @@ def admin():
         
         cursor.execute("SELECT status, COUNT(*) FROM customers GROUP BY status")
         status_counts = dict(cursor.fetchall())
+        
+        # 🚀 新增：老板专属核心数据（总客户、待处理、成交数）
         pending_count = status_counts.get('Pending', 0)
-        contacted_count = status_counts.get('Contacted', 0)
-        quoted_count = status_counts.get('Quoted', 0)
         closed_count = status_counts.get('Closed', 0)
         total_count = len(rows)
         
@@ -289,11 +303,9 @@ def admin():
                 </div>
                 
                 <div class="row mb-4">
-                    <div class="col-md-2"><div class="card bg-primary text-white text-center p-3 shadow-sm"><h5>总询盘</h5><h2 class="mb-0">{total_count}</h2></div></div>
-                    <div class="col-md-2"><div class="card bg-warning text-dark text-center p-3 shadow-sm"><h5>待处理</h5><h2 class="mb-0">{pending_count}</h2></div></div>
-                    <div class="col-md-2"><div class="card bg-info text-dark text-center p-3 shadow-sm"><h5>已联系</h5><h2 class="mb-0">{contacted_count}</h2></div></div>
-                    <div class="col-md-2"><div class="card bg-secondary text-white text-center p-3 shadow-sm"><h5>已报价</h5><h2 class="mb-0">{quoted_count}</h2></div></div>
-                    <div class="col-md-2"><div class="card bg-success text-white text-center p-3 shadow-sm"><h5>已成交</h5><h2 class="mb-0">{closed_count}</h2></div></div>
+                    <div class="col-md-3"><div class="card bg-primary text-white text-center p-3 shadow-sm"><h5>总询盘</h5><h2 class="mb-0">{total_count}</h2></div></div>
+                    <div class="col-md-3"><div class="card bg-warning text-dark text-center p-3 shadow-sm"><h5>待处理</h5><h2 class="mb-0">{pending_count}</h2></div></div>
+                    <div class="col-md-3"><div class="card bg-success text-white text-center p-3 shadow-sm"><h5>已成交</h5><h2 class="mb-0">{closed_count}</h2></div></div>
                 </div>
 
                 <table class="table table-bordered table-hover bg-white shadow-sm align-middle">
