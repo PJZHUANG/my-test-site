@@ -7,6 +7,8 @@ import requests
 import smtplib
 from email.mime.text import MIMEText
 from email.header import Header
+from werkzeug.utils import secure_filename
+import base64
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'top_secret_quarktwin_key_2026')
@@ -14,6 +16,12 @@ app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'top_secret_quarktwin_key_20
 DEEPSEEK_API_KEY = os.environ.get('DEEPSEEK_API_KEY', '')
 SMTP_USER = os.environ.get('SMTP_USER', '')
 SMTP_PASS = os.environ.get('SMTP_PASS', '')
+ZHIPU_API_KEY = os.environ.get('ZHIPU_API_KEY', '') # 新增：视觉模型API
+
+# 限制只能传图片
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg'}
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 def get_db():
     return pymysql.connect(host='localhost', user='appuser', password='Bta3456789', database='quarktwin_crm', charset='utf8mb4')
@@ -29,21 +37,32 @@ def submit():
         email = request.form['email']
         message = request.form['message']
         
+        image_url = ""
+        # 🛡️ 处理图片上传（带安全校验）
+        if 'chip_image' in request.files:
+            file = request.files['chip_image']
+            if file and allowed_file(file.filename):
+                filename = secure_filename(file.filename)
+                # 防止同名文件覆盖，加上时间戳
+                import time
+                filename = str(int(time.time())) + "_" + filename
+                save_path = os.path.join('/var/www/html/static/uploads', filename)
+                file.save(save_path)
+                image_url = f"/static/uploads/{filename}"
+                
         db = get_db()
         cursor = db.cursor()
-        
-        # 🚀 自动派单逻辑：查询所有业务员，按 ID 轮流分配
         cursor.execute("SELECT username FROM users WHERE role = 'sales' ORDER BY id")
         sales_users = [u[0] for u in cursor.fetchall()]
         
         assigned_to = 'Unassigned'
         if sales_users:
-            # 查一下现在的总客户数，用来做取模运算
             cursor.execute("SELECT COUNT(*) FROM customers")
-            total_customers = cursor.fetchone()[0]
-            assigned_to = sales_users[total_customers % len(sales_users)]
+            total = cursor.fetchone()[0]
+            assigned_to = sales_users[total % len(sales_users)]
             
-        cursor.execute("INSERT INTO customers (name, email, message, assigned_to) VALUES (%s, %s, %s, %s)", (name, email, message, assigned_to))
+        cursor.execute("INSERT INTO customers (name, email, message, assigned_to, image_url) VALUES (%s, %s, %s, %s, %s)", 
+                       (name, email, message, assigned_to, image_url))
         db.commit()
         db.close()
         return "<div style='text-align:center; margin-top:100px;'><h2 style='color:green;'>Thank you! Inquiry received.</h2><a href='/'>Home</a></div>"
@@ -102,20 +121,52 @@ def ai_reply(customer_id):
     try:
         db = get_db()
         cursor = db.cursor()
-        cursor.execute("SELECT name, email, message FROM customers WHERE id = %s", (customer_id,))
+        cursor.execute("SELECT name, email, message, image_url FROM customers WHERE id = %s", (customer_id,))
         row = cursor.fetchone()
         db.close()
+        
         if not row:
             return "Customer not found", 404
-        customer_name, customer_email, customer_message = row
+            
+        customer_name, customer_email, customer_message, image_url = row
+        
+        image_context = ""
+        # 🚀 如果有图片，先用视觉大模型分析
+        if image_url:
+            image_path = "/var/www/html" + image_url
+            if os.path.exists(image_path):
+                with open(image_path, "rb") as img_file:
+                    base64_image = base64.b64encode(img_file.read()).decode('utf-8')
+                
+                headers_vision = {"Authorization": f"Bearer {ZHIPU_API_KEY}", "Content-Type": "application/json"}
+                data_vision = {
+                    "model": "glm-4v",
+                    "messages": [{
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": "仔细看这张图片，如果里面是电子元器件或电路板，请提取出图中的芯片型号、品牌丝印。直接输出识别结果，不要废话。"},
+                            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
+                        ]
+                    }]
+                }
+                # 调用智谱视觉模型
+                res_vision = requests.post("https://open.bigmodel.cn/api/paas/v4/chat/completions", headers=headers_vision, json=data_vision)
+                vision_result = res_vision.json().get('choices', [{}])[0].get('message', {}).get('content', '')
+                if vision_result:
+                    image_context = f"\n(注意：客户还上传了图片，AI识别图片中的芯片型号为：{vision_result})"
+
+        # 然后让 DeepSeek 结合文字和图片识别结果写回复
         headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
-        prompt = f"你是一家深圳顶尖电子元器件供应商（QuarkTwin）的外贸销售总监。请针对客户的留言写一封英文回复邮件。客户留言：'{customer_message}'。请直接输出邮件正文，不要任何废话。"
+        prompt = f"你是一家深圳顶尖电子元器件供应商（QuarkTwin）的外贸销售总监。客户留言：'{customer_message}'。{image_context}。请据此写一封英文回复邮件，体现我们的专业度，并顺便给个大概报价区间。直接输出邮件正文。"
         data = {"model": "deepseek-chat", "messages": [{"role": "user", "content": prompt}], "temperature": 0.7}
+        
         response = requests.post("https://api.deepseek.com/chat/completions", headers=headers, json=data)
         ai_content = response.json()['choices'][0]['message']['content']
+        
         return f"""
         <div style="font-family: Arial; padding: 50px; max-width: 800px; margin: 0 auto;">
             <h3>AI 生成的回复草稿 (发给 {customer_email})：</h3>
+            {f'<p><strong>客户上传的图片：</strong><br><img src="{image_url}" style="max-width: 300px; border-radius: 8px;"></p>' if image_url else ''}
             <form action="/send_email/{customer_id}" method="POST">
                 <textarea name="email_content" style="width: 100%; height: 300px; padding: 20px; font-size: 16px; border-radius: 8px; border: 1px solid #ccc;">{ai_content}</textarea>
                 <br><br>
@@ -187,13 +238,12 @@ def admin():
         cursor = db.cursor()
         
         if session.get('role') == 'boss':
-            cursor.execute("SELECT id, name, email, message, status, assigned_to FROM customers ORDER BY id DESC")
+            cursor.execute("SELECT id, name, email, message, status, assigned_to, image_url FROM customers ORDER BY id DESC")
         else:
-            cursor.execute("SELECT id, name, email, message, status, assigned_to FROM customers WHERE assigned_to = %s ORDER BY id DESC", (session.get('username'),))
+            cursor.execute("SELECT id, name, email, message, status, assigned_to, image_url FROM customers WHERE assigned_to = %s ORDER BY id DESC", (session.get('username'),))
             
         rows = cursor.fetchall()
         
-        # 🚀 数据大屏：统计看板（只统计当前用户能看到的数据）
         cursor.execute("SELECT status, COUNT(*) FROM customers GROUP BY status")
         status_counts = dict(cursor.fetchall())
         pending_count = status_counts.get('Pending', 0)
@@ -216,8 +266,6 @@ def admin():
         </head>
         <body class="p-5 bg-light">
             <div class="container">
-                
-                <!-- 顶部控制栏 -->
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                     <h2 style="margin: 0;">Welcome, {session.get('username')} ({session.get('role')})</h2>
                     <div>
@@ -225,44 +273,18 @@ def admin():
                         <a href="/logout" style="background-color: #dc3545; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px;">🔒 LOG OUT</a>
                     </div>
                 </div>
-
-                <!-- 🚀 数据大屏统计卡片 -->
+                
                 <div class="row mb-4">
-                    <div class="col-md-2">
-                        <div class="card bg-primary text-white text-center p-3 shadow-sm">
-                            <h5>总询盘</h5>
-                            <h2 class="mb-0">{total_count}</h2>
-                        </div>
-                    </div>
-                    <div class="col-md-2">
-                        <div class="card bg-warning text-dark text-center p-3 shadow-sm">
-                            <h5>待处理</h5>
-                            <h2 class="mb-0">{pending_count}</h2>
-                        </div>
-                    </div>
-                    <div class="col-md-2">
-                        <div class="card bg-info text-dark text-center p-3 shadow-sm">
-                            <h5>已联系</h5>
-                            <h2 class="mb-0">{contacted_count}</h2>
-                        </div>
-                    </div>
-                    <div class="col-md-2">
-                        <div class="card bg-secondary text-white text-center p-3 shadow-sm">
-                            <h5>已报价</h5>
-                            <h2 class="mb-0">{quoted_count}</h2>
-                        </div>
-                    </div>
-                    <div class="col-md-2">
-                        <div class="card bg-success text-white text-center p-3 shadow-sm">
-                            <h5>已成交</h5>
-                            <h2 class="mb-0">{closed_count}</h2>
-                        </div>
-                    </div>
+                    <div class="col-md-2"><div class="card bg-primary text-white text-center p-3 shadow-sm"><h5>总询盘</h5><h2 class="mb-0">{total_count}</h2></div></div>
+                    <div class="col-md-2"><div class="card bg-warning text-dark text-center p-3 shadow-sm"><h5>待处理</h5><h2 class="mb-0">{pending_count}</h2></div></div>
+                    <div class="col-md-2"><div class="card bg-info text-dark text-center p-3 shadow-sm"><h5>已联系</h5><h2 class="mb-0">{contacted_count}</h2></div></div>
+                    <div class="col-md-2"><div class="card bg-secondary text-white text-center p-3 shadow-sm"><h5>已报价</h5><h2 class="mb-0">{quoted_count}</h2></div></div>
+                    <div class="col-md-2"><div class="card bg-success text-white text-center p-3 shadow-sm"><h5>已成交</h5><h2 class="mb-0">{closed_count}</h2></div></div>
                 </div>
 
                 <table class="table table-bordered table-hover bg-white shadow-sm align-middle">
                     <thead class="table-dark">
-                        <tr><th>ID</th><th>Name</th><th>Email</th><th>Message</th><th>负责人</th><th>状态流转</th><th>AI 操作</th></tr>
+                        <tr><th>ID</th><th>Name</th><th>Email</th><th>Message & Image</th><th>负责人</th><th>状态流转</th><th>AI 操作</th></tr>
                     </thead>
                     <tbody>
         """
@@ -291,12 +313,15 @@ def admin():
 
             action_btn = f'<a href="/ai_reply/{row[0]}" style="background-color: #6f42c1; color: white; padding: 6px 12px; text-decoration: none; border-radius: 4px; font-size: 14px; white-space: nowrap; display: inline-block;">🤖 AI 写回复</a>'
             
+            # 如果有图片，就在留言下面显示一个小缩略图
+            image_thumb = f'<br><a href="{row[6]}" target="_blank"><img src="{row[6]}" style="max-height: 50px; border-radius: 4px; margin-top: 5px;"></a>' if row[6] else ''
+            
             html += f"""
             <tr>
                 <td>{row[0]}</td>
                 <td>{row[1]}</td>
                 <td>{row[2]}</td>
-                <td>{row[3]}</td>
+                <td>{row[3]} {image_thumb}</td>
                 <td>{assigned_html}</td>
                 <td>{status_html}</td>
                 <td>{action_btn}</td>
