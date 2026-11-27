@@ -105,22 +105,29 @@ def submit():
 @app.route('/track', methods=['GET', 'POST'])
 def track_order():
     orders = []
+    error_msg = None
     if request.method == 'POST':
-        email = request.form['email']
-        db = get_db()
-        cursor = db.cursor()
-        cursor.execute("""
-            SELECT o.id, o.total_amount, o.status, o.created_at, 
-                   GROUP_CONCAT(CONCAT(p.name, ' (x', i.quantity, ')') SEPARATOR '<br>') as items
-            FROM shop_orders o
-            LEFT JOIN shop_order_items i ON o.id = i.order_id
-            LEFT JOIN shop_products p ON i.product_id = p.id
-            WHERE o.customer_email = %s
-            GROUP BY o.id ORDER BY o.id DESC
-        """, (email,))
-        orders = cursor.fetchall()
-        db.close()
-    return render_template('track.html', orders=orders)
+        try:
+            email = request.form['email']
+            db = get_db()
+            cursor = db.cursor()
+            # 增加了 GROUP BY 的严格限制，防止 MySQL 报错
+            cursor.execute("""
+                SELECT o.id, o.total_amount, o.status, o.created_at, 
+                       GROUP_CONCAT(CONCAT(p.name, ' (x', i.quantity, ')') SEPARATOR '<br>') as items
+                FROM shop_orders o
+                LEFT JOIN shop_order_items i ON o.id = i.order_id
+                LEFT JOIN shop_products p ON i.product_id = p.id
+                WHERE o.customer_email = %s
+                GROUP BY o.id, o.total_amount, o.status, o.created_at
+                ORDER BY o.id DESC
+            """, (email,))
+            orders = cursor.fetchall()
+            db.close()
+        except Exception as e:
+            error_msg = f"查单报错啦，具体原因: {str(e)}"
+            
+    return render_template('track.html', orders=orders, error_msg=error_msg)
 
 # 🚀 AI 客服接口（带防刷限制）
 @app.route('/api/chat', methods=['POST'])

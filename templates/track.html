@@ -60,6 +60,9 @@
                 </tbody>
             </table>
             {% elif request.method == 'POST' %}
+                            {% elif error_msg %}
+                <p style="color: red;">{{ error_msg }}</p>
+            {% elif request.method == 'POST' %}
                 <p style="color: #ffc107;">No orders found for this email address.</p>
             {% endif %}
         </div>
