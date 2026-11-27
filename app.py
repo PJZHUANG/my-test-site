@@ -577,5 +577,36 @@ def admin():
     except Exception as e:
         return f"<h2>Database Error: {str(e)}</h2>", 500
 
+from flask import Response
+
+# 🚀 1. 告诉 Google 爬虫哪些页面可以抓取
+@app.route('/robots.txt')
+def robots():
+    content = "User-agent: *\nAllow: /\nSitemap: https://pjzhuang.com/sitemap.xml"
+    return Response(content, mimetype="text/plain")
+
+# 🚀 2. 生成网站地图，自动包含所有产品页
+@app.route('/sitemap.xml')
+def sitemap():
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute("SELECT id FROM shop_products")
+    products = cursor.fetchall()
+    db.close()
+    
+    xml = '<?xml version="1.0" encoding="UTF-8"?>\n'
+    xml += '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+    
+    # 首页
+    xml += '  <url>\n    <loc>https://pjzhuang.com/</loc>\n    <changefreq>daily</changefreq>\n    <priority>1.0</priority>\n  </url>\n'
+    # 商城页
+    xml += '  <url>\n    <loc>https://pjzhuang.com/shop</loc>\n    <changefreq>daily</changefreq>\n    <priority>0.9</priority>\n  </url>\n'
+    
+    # 循环加入所有商品页（假设以后我们会做单品详情页）
+    for p in products:
+        xml += f'  <url>\n    <loc>https://pjzhuang.com/product/{p[0]}</loc>\n    <priority>0.8</priority>\n  </url>\n'
+        
+    xml += '</urlset>'
+    return Response(xml, mimetype='application/xml')
 if __name__ == '__main__':
     app.run()
