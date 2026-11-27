@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ product[1] }} | QuarkTwin</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <style>
+        :root { --bg-color: #050505; --primary: #00f2fe; --glass-bg: rgba(255, 255, 255, 0.05); --glass-border: rgba(255, 255, 255, 0.1); }
+        body { background-color: var(--bg-color); color: white; font-family: 'Inter', sans-serif; margin: 0; padding: 0; }
+        nav { padding: 20px 50px; background: rgba(5, 5, 5, 0.6); border-bottom: 1px solid var(--glass-border); }
+        .logo { font-size: 24px; font-weight: 800; color: var(--primary); text-decoration: none; }
+        .container { max-width: 1200px; margin: 100px auto; display: flex; gap: 50px; padding: 0 20px; }
+        .image-area { flex: 1; background: var(--glass-bg); border: 1px solid var(--glass-border); border-radius: 20px; height: 400px; display: flex; align-items: center; justify-content: center; font-size: 100px; }
+        .info-area { flex: 1; }
+        .model { color: var(--primary); font-weight: 600; letter-spacing: 1px; }
+        h1 { font-size: 3rem; margin: 10px 0; }
+        .price { font-size: 2.5rem; font-weight: 800; color: #fff; margin: 20px 0; }
+        .desc { color: #a0a0a0; line-height: 1.8; font-size: 1.1rem; margin-bottom: 30px; }
+        .stock { margin-bottom: 30px; color: #666; }
+        .btn-add { display: inline-block; background: linear-gradient(to right, var(--primary), #4facfe); color: #000; padding: 15px 40px; font-weight: 800; border-radius: 10px; text-decoration: none; font-size: 1.2rem; transition: 0.3s; }
+        .btn-add:hover { transform: scale(1.05); box-shadow: 0 10px 20px rgba(0, 242, 254, 0.3); }
+    </style>
+</head>
+<body>
+    <nav><a href="/" class="logo">QuarkTwin</a></nav>
+    <div class="container">
+        <div class="image-area">🔌</div>
+        <div class="info-area">
+            <div class="model">{{ product[2] }}</div>
+            <h1>{{ product[1] }}</h1>
+            <div class="price">${{ product[3] }}</div>
+            <div class="stock">In Stock: {{ product[4] }} units available</div>
+            <p class="desc">{{ product[5] }}</p>
+            <a href="/add_to_cart/{{ product[0] }}" class="btn-add">Add to Cart</a>
+        </div>
+    </div>
+</body>
+</html>

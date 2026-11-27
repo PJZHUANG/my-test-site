@@ -267,6 +267,19 @@ def shop():
     except Exception as e:
         return f"<h2>Shop Error: {str(e)}</h2>", 500
 
+@app.route('/product/<int:product_id>')
+def product_detail(product_id):
+    try:
+        db = get_db()
+        cursor = db.cursor()
+        cursor.execute("SELECT id, name, model, price, stock, description FROM shop_products WHERE id = %s", (product_id,))
+        product = cursor.fetchone()
+        db.close()
+        if not product:
+            return "Product not found", 404
+        return render_template('product.html', product=product)
+    except Exception as e:
+        return f"<h2>Error: {str(e)}</h2>", 500
 @app.route('/add_to_cart/<int:product_id>')
 def add_to_cart(product_id):
     cart = session.get('cart', {})
@@ -554,6 +567,11 @@ def sitemap():
     xml += '</urlset>'
     return Response(xml, mimetype='application/xml')
 
+@app.route('/admin/dashboard')
+def admin_dashboard():
+    if not session.get('logged_in') or session.get('role') != 'boss':
+        return "Access Denied", 403
+    return render_template('dashboard.html')
 @app.route('/admin')
 def admin():
     if not session.get('logged_in'):
@@ -587,6 +605,7 @@ def admin():
             <a href="/admin/orders" style="background-color: #0d6efd; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px; margin-right: 10px;">📦 VIEW ORDERS</a>
             <a href="/admin/products" style="background-color: #fd7e14; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px; margin-right: 10px;">🛒 MANAGE PRODUCTS</a>
             <a href="/admin/bulk_email" style="background-color: #d63384; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px; margin-right: 10px;">📧 AI MARKETING</a>
+            <a href="/admin/dashboard" style="background-color: #6f42c1; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px; margin-right: 10px;">📊 BI DASHBOARD</a>
             <a href="/export" style="background-color: #198754; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px; margin-right: 10px;">📥 EXPORT EXCEL</a>
             """
         

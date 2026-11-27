@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>BI Dashboard | QuarkTwin</title>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+    <style>
+        body { background-color: #f8f9fa; font-family: 'Arial', sans-serif; margin: 0; padding: 30px; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; }
+        .card { background: white; border-radius: 10px; padding: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+        .row { display: flex; gap: 20px; margin-bottom: 20px; }
+        .col { flex: 1; }
+        #lineChart, #pieChart { width: 100%; height: 400px; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h2>📊 QuarkTwin Business Intelligence</h2>
+        <a href="/admin" style="background: #0d6efd; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">← Back to Admin</a>
+    </div>
+
+    <div class="row">
+        <div class="col card">
+            <h3 style="text-align: center;">Monthly Revenue (USD)</h3>
+            <div id="lineChart"></div>
+        </div>
+        <div class="col card">
+            <h3 style="text-align: center;">Top Selling Products</h3>
+            <div id="pieChart"></div>
+        </div>
+    </div>
+
+    <script>
+        // 销售折线图
+        var lineChart = echarts.init(document.getElementById('lineChart'));
+        var lineOption = {
+            tooltip: { trigger: 'axis' },
+            xAxis: { type: 'category', data: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul'] },
+            yAxis: { type: 'value' },
+            series: [{
+                data: [15000, 23000, 22400, 31000, 42000, 58000, 85000],
+                type: 'line',
+                smooth: true,
+                itemStyle: { color: '#00f2fe' },
+                areaStyle: {
+                    color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                        { offset: 0, color: 'rgba(0, 242, 254, 0.5)' },
+                        { offset: 1, color: 'rgba(0, 242, 254, 0)' }
+                    ])
+                }
+            }]
+        };
+        lineChart.setOption(lineOption);
+
+        // 热销产品饼图
+        var pieChart = echarts.init(document.getElementById('pieChart'));
+        var pieOption = {
+            tooltip: { trigger: 'item' },
+            series: [{
+                type: 'pie',
+                radius: ['40%', '70%'],
+                data: [
+                    { value: 1048, name: 'STM32 Chips', itemStyle: { color: '#0d6efd' } },
+                    { value: 735, name: 'TI Power ICs', itemStyle: { color: '#198754' } },
+                    { value: 580, name: 'Connectors', itemStyle: { color: '#dc3545' } },
+                    { value: 484, name: 'Sensors', itemStyle: { color: '#ffc107' } }
+                ]
+            }]
+        };
+        pieChart.setOption(pieOption);
+
+        // 响应式调整
+        window.addEventListener('resize', function() {
+            lineChart.resize();
+            pieChart.resize();
+        });
+    </script>
+</body>
+</html>
