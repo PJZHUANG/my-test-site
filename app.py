@@ -16,6 +16,16 @@ import json
 import random
 
 app = Flask(__name__)
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+
+# ... (在 app = Flask(__name__) 下面) ...
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    default_limits=["200 per day", "50 per hour"],
+    storage_uri="memory://"
+)
 app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'top_secret_quarktwin_key_2026')
 
 DEEPSEEK_API_KEY = os.environ.get('DEEPSEEK_API_KEY', '')
@@ -691,6 +701,10 @@ def admin():
 # 🚀 悬浮 AI 客服聊天 API
 # ==========================================
 @app.route('/api/chat', methods=['POST'])
+@app.route('/api/chat', methods=['POST'])
+@limiter.limit("5 per minute")  # 🚀 核心：限制每分钟最多 5 次请求
+def chat():
+    # ... 原有代码 ...
 def chat():
     data = request.get_json()
     user_message = data.get('message', '')
