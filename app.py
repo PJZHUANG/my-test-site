@@ -1,9 +1,30 @@
 import stripe
 import os
-
+from flask import Flask, request, render_template, redirect, url_for, session, make_response
+import pymysql
+import pandas as pd
+from io import BytesIO
+import requests
+import smtplib
+from email.mime.text import MIMEText
+from email.header import Header
+from werkzeug.utils import secure_filename
+import base64
+import ssl
+import time
+import json
+import random
 app = Flask(__name__)
 app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'top_secret_quarktwin_key_2026')
-
+DEEPSEEK_API_KEY = os.environ.get('DEEPSEEK_API_KEY', '')
+SMTP_USER = os.environ.get('SMTP_USER', '')
+SMTP_PASS = os.environ.get('SMTP_PASS', '')
+ZHIPU_API_KEY = os.environ.get('ZHIPU_API_KEY', '')
+WEBHOOK_URL = os.environ.get('WEBHOOK_URL', '')
+STRIPE_SECRET_KEY = os.environ.get('STRIPE_SECRET_KEY', '')
+stripe.api_key = STRIPE_SECRET_KEY
+app = Flask(__name__)
+app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'top_secret_quarktwin_key_2026')
 DEEPSEEK_API_KEY = os.environ.get('DEEPSEEK_API_KEY', '')
 SMTP_USER = os.environ.get('SMTP_USER', '')
 SMTP_PASS = os.environ.get('SMTP_PASS', '')
