@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Track Order | QuarkTwin</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <style>
+        :root { --bg: #050505; --primary: #00f2fe; --glass: rgba(255,255,255,0.05); --border: rgba(255,255,255,0.1); }
+        body { background: var(--bg); color: white; font-family: 'Inter', sans-serif; margin: 0; padding: 50px; }
+        nav { padding: 20px 0; margin-bottom: 50px; }
+        .logo { font-size: 24px; font-weight: 800; color: var(--primary); text-decoration: none; }
+        .container { max-width: 800px; margin: 0 auto; }
+        .card { background: var(--glass); border: 1px solid var(--border); border-radius: 20px; padding: 40px; }
+        h2 { margin-top: 0; font-weight: 600; }
+        .form-group { display: flex; gap: 15px; margin-bottom: 30px; }
+        input[type="email"] { flex: 1; padding: 15px; border-radius: 10px; border: 1px solid var(--border); background: rgba(0,0,0,0.5); color: white; font-size: 16px; outline: none; }
+        input[type="email"]:focus { border-color: var(--primary); }
+        button { padding: 15px 30px; background: linear-gradient(135deg, var(--primary), #4facfe); border: none; border-radius: 10px; color: #000; font-weight: 800; cursor: pointer; font-size: 16px; transition: 0.3s; }
+        button:hover { transform: scale(1.05); }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { padding: 15px; text-align: left; border-bottom: 1px solid var(--border); }
+        th { color: var(--primary); font-weight: 600; }
+        .badge { padding: 5px 10px; border-radius: 20px; font-size: 12px; font-weight: bold; }
+        .badge-paid { background: rgba(25, 135, 84, 0.2); color: #20c997; border: 1px solid #20c997; }
+        .badge-pending { background: rgba(255, 193, 7, 0.2); color: #ffc107; border: 1px solid #ffc107; }
+    </style>
+</head>
+<body>
+    <nav><a href="/" class="logo">QuarkTwin</a></nav>
+    <div class="container">
+        <div class="card">
+            <h2>📦 Track Your Order</h2>
+            <p style="color: #aaa; margin-bottom: 30px;">Enter your email address to view your order history and status.</p>
+            <form method="POST">
+                <div class="form-group">
+                    <input type="email" name="email" placeholder="john@company.com" required>
+                    <button type="submit">Search</button>
+                </div>
+            </form>
+
+            {% if orders %}
+            <table>
+                <thead>
+                    <tr><th>Order ID</th><th>Items</th><th>Total</th><th>Status</th><th>Date</th></tr>
+                </thead>
+                <tbody>
+                    {% for order in orders %}
+                    <tr>
+                        <td>#{{ order[0] }}</td>
+                        <td>{{ order[4]|safe }}</td>
+                        <td style="color: var(--primary); font-weight: bold;">${{ order[1] }}</td>
+                        <td>
+                            <span class="badge {{ 'badge-paid' if order[2] == 'Paid' else 'badge-pending' }}">
+                                {{ order[2] }}
+                            </span>
+                        </td>
+                        <td>{{ str(order[3])[:10] }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% elif request.method == 'POST' %}
+                <p style="color: #ffc107;">No orders found for this email address.</p>
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html>

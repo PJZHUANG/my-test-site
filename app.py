@@ -726,5 +726,24 @@ def chat():
         return jsonify({"response": ai_content})
     except Exception as e:
         return jsonify({"response": "Sorry, I am having network issues. Please leave an inquiry via the form below."}), 500
+@app.route('/track', methods=['GET', 'POST'])
+def track_order():
+    orders = []
+    if request.method == 'POST':
+        email = request.form['email']
+        db = get_db()
+        cursor = db.cursor()
+        cursor.execute("""
+            SELECT o.id, o.total_amount, o.status, o.created_at, 
+                   GROUP_CONCAT(CONCAT(p.name, ' (x', i.quantity, ')') SEPARATOR '<br>') as items
+            FROM shop_orders o
+            LEFT JOIN shop_order_items i ON o.id = i.order_id
+            LEFT JOIN shop_products p ON i.product_id = p.id
+            WHERE o.customer_email = %s
+            GROUP BY o.id ORDER BY o.id DESC
+        """, (email,))
+        orders = cursor.fetchall()
+        db.close()
+    return render_template('track.html', orders=orders)
 if __name__ == '__main__':
     app.run()
