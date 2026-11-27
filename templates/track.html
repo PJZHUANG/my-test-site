@@ -54,7 +54,7 @@
                                 {{ order[2] }}
                             </span>
                         </td>
-                        <td>{{ str(order[3])[:10] }}</td>
+                        <td>{{ (order[3]|string)[:10] }}</td>
                     </tr>
                     {% endfor %}
                 </tbody>
