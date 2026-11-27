@@ -3,113 +3,181 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>QuarkTwin - Electronic Components</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <title>QuarkTwin | Your Trusted Electronic Partner</title>
+    <!-- 引入现代字体 -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <!-- 引入 AOS 滚动动画库 -->
+    <link href="https://unpkg.com/aos@2.3.1/dist/aos.css" rel="stylesheet">
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-        .hero { background: url('https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&q=80') no-repeat center center/cover; height: 60vh; position: relative; }
-        .hero-overlay { background: rgba(11, 31, 58, 0.8); position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; }
-        .card { transition: transform 0.3s; }
-        .card:hover { transform: translateY(-10px); box-shadow: 0 10px 20px rgba(0,0,0,0.1); }
+        :root {
+            --bg-color: #050505;
+            --primary: #00f2fe;
+            --secondary: #4facfe;
+            --text-light: #ffffff;
+            --text-muted: #a0a0a0;
+            --glass-bg: rgba(255, 255, 255, 0.05);
+            --glass-border: rgba(255, 255, 255, 0.1);
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', sans-serif; }
+        body { background-color: var(--bg-color); color: var(--text-light); overflow-x: hidden; }
+        
+        /* 背景光效 */
+        .bg-glow {
+            position: fixed; top: -20%; left: -10%; width: 50vw; height: 50vw;
+            background: radial-gradient(circle, rgba(0,242,254,0.15) 0%, rgba(5,5,5,0) 70%);
+            z-index: -1; border-radius: 50%; filter: blur(60px);
+        }
+        .bg-glow-2 {
+            position: fixed; bottom: -20%; right: -10%; width: 40vw; height: 40vw;
+            background: radial-gradient(circle, rgba(79,172,254,0.15) 0%, rgba(5,5,5,0) 70%);
+            z-index: -1; border-radius: 50%; filter: blur(60px);
+        }
+
+        /* 玻璃拟物化导航栏 */
+        nav {
+            position: fixed; width: 100%; top: 0; padding: 20px 50px;
+            display: flex; justify-content: space-between; align-items: center;
+            background: rgba(5, 5, 5, 0.6); backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--glass-border); z-index: 1000;
+        }
+        .logo { font-size: 24px; font-weight: 800; letter-spacing: 2px; background: linear-gradient(to right, var(--primary), var(--secondary)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .nav-links a { color: var(--text-light); text-decoration: none; margin-left: 30px; font-weight: 600; font-size: 14px; transition: color 0.3s; }
+        .nav-links a:hover { color: var(--primary); }
+
+        /* Hero 区域 */
+        .hero { height: 100vh; display: flex; align-items: center; justify-content: center; text-align: center; padding: 0 20px; }
+        .hero-content h1 { font-size: 4rem; font-weight: 800; line-height: 1.2; margin-bottom: 20px; }
+        .hero-content h1 span { background: linear-gradient(to right, var(--primary), var(--secondary)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .hero-content p { font-size: 1.2rem; color: var(--text-muted); margin-bottom: 40px; max-width: 600px; margin-inline: auto; }
+        .btn-primary {
+            padding: 15px 40px; font-size: 1rem; font-weight: 600; border-radius: 30px;
+            background: linear-gradient(to right, var(--primary), var(--secondary));
+            color: #000; border: none; cursor: pointer; transition: transform 0.3s, box-shadow 0.3s; text-decoration: none; display: inline-block;
+        }
+        .btn-primary:hover { transform: translateY(-3px); box-shadow: 0 10px 20px rgba(0, 242, 254, 0.3); }
+
+        /* 产品与服务区 */
+        .section-title { text-align: center; font-size: 2.5rem; margin-bottom: 50px; font-weight: 600; }
+        .features { padding: 100px 50px; display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 30px; max-width: 1200px; margin: 0 auto; }
+        .feature-card {
+            background: var(--glass-bg); border: 1px solid var(--glass-border); border-radius: 20px;
+            padding: 40px; transition: transform 0.4s, background 0.4s; backdrop-filter: blur(10px);
+        }
+        .feature-card:hover { transform: translateY(-10px); background: rgba(255, 255, 255, 0.08); border-color: rgba(0, 242, 254, 0.3); }
+        .feature-icon { font-size: 40px; margin-bottom: 20px; }
+        .feature-card h3 { font-size: 1.5rem; margin-bottom: 15px; }
+        .feature-card p { color: var(--text-muted); line-height: 1.6; }
+
+        /* 询盘表单区 */
+        .contact-section { padding: 100px 20px; display: flex; justify-content: center; }
+        .contact-form-container {
+            background: var(--glass-bg); border: 1px solid var(--glass-border); border-radius: 20px;
+            padding: 50px; width: 100%; max-width: 600px; backdrop-filter: blur(20px);
+            box-shadow: 0 20px 40px rgba(0,0,0,0.5);
+        }
+        .form-group { margin-bottom: 25px; }
+        .form-group label { display: block; margin-bottom: 10px; font-weight: 600; color: var(--text-muted); font-size: 14px; }
+        .form-control {
+            width: 100%; padding: 15px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border);
+            border-radius: 10px; color: white; font-size: 16px; transition: border 0.3s, box-shadow 0.3s;
+        }
+        .form-control:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 15px rgba(0,242,254,0.2); }
+        textarea.form-control { resize: vertical; min-height: 120px; }
+        
+        /* 文件上传按钮美化 */
+        input[type="file"]::file-selector-button {
+            background: var(--glass-bg); color: white; border: 1px solid var(--glass-border);
+            padding: 10px 20px; border-radius: 8px; cursor: pointer; transition: 0.3s; margin-right: 15px;
+        }
+        input[type="file"]::file-selector-button:hover { background: rgba(255,255,255,0.1); }
+
+        .error-msg { color: #ff4d4f; font-size: 14px; margin-top: 10px; }
+        .footer { text-align: center; padding: 40px; color: var(--text-muted); border-top: 1px solid var(--glass-border); font-size: 14px; }
     </style>
 </head>
 <body>
-    <!-- 导航栏 -->
-    <nav class="navbar navbar-expand-lg navbar-dark bg-dark fixed-top">
-        <div class="container">
-            <a class="navbar-brand" href="#">QuarkTwin</a>
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
-                <span class="navbar-toggler-icon"></span>
-            </button>
-            <div class="collapse navbar-collapse" id="navbarNav">
-                <ul class="navbar-nav ms-auto">
-                    <li class="nav-item"><a class="nav-link" href="#about">About</a></li>
-                    <li class="nav-item"><a class="nav-link" href="#products">Products</a></li>
-                    <li class="nav-item"><a class="nav-link" href="#contact">Contact</a></li>
-                </ul>
-            </div>
+    <div class="bg-glow"></div>
+    <div class="bg-glow-2"></div>
+
+    <nav>
+        <div class="logo">QuarkTwin</div>
+        <div class="nav-links">
+            <a href="#features">Why Us</a>
+            <a href="/shop" style="color: var(--primary);">Shop Components</a>
+            <a href="#contact">Contact</a>
         </div>
     </nav>
 
-    <!-- 首屏 -->
-    <div class="hero">
-        <div class="hero-overlay text-center text-white">
-            <div>
-                <h1 class="display-3 fw-bold">Your Trusted Partner in Electronics</h1>
-                <p class="lead">Shenzhen's Finest Supply Chain Solutions</p>
-            </div>
+    <section class="hero">
+        <div class="hero-content" data-aos="fade-up" data-aos-duration="1000">
+            <h1>Powering the Future of <br><span>Electronic Innovation</span></h1>
+            <p>Your premier supply chain partner based in Shenzhen. We source, verify, and deliver world-class electronic components to global manufacturers.</p>
+            <a href="#contact" class="btn-primary">Request a Quote Now</a>
         </div>
+    </section>
+
+    <section id="features" class="features">
+        <div class="feature-card" data-aos="fade-up" data-aos-delay="100">
+            <div class="feature-icon">⚡</div>
+            <h3>Global Fast Shipping</h3>
+            <p>Partnered with DHL and FedEx to ensure your critical components arrive within 3-5 business days, anywhere in the world.</p>
+        </div>
+        <div class="feature-card" data-aos="fade-up" data-aos-delay="200">
+            <div class="feature-icon">🛡️</div>
+            <h3>100% Authentic Guarantee</h3>
+            <p>Zero tolerance for counterfeits. Every chip is tested and verified by our in-house QA team before dispatch.</p>
+        </div>
+        <div class="feature-card" data-aos="fade-up" data-aos-delay="300">
+            <div class="feature-icon">🤖</div>
+            <h3>AI-Powered Quoting</h3>
+            <p>Send us a photo of your chip, and our cutting-edge AI vision will instantly identify the model and give you a price.</p>
+        </div>
+    </section>
+
+    <section id="contact" class="contact-section">
+        <div class="contact-form-container" data-aos="fade-up">
+            <h2 style="text-align: center; margin-bottom: 30px; font-size: 2rem;">Send an Inquiry</h2>
+            <!-- 保留原有的表单提交路径、enctype 和验证码 -->
+            <form action="/submit" method="POST" enctype="multipart/form-data">
+                <div class="form-group">
+                    <label>Your Name</label>
+                    <input type="text" name="name" class="form-control" required placeholder="John Doe">
+                </div>
+                <div class="form-group">
+                    <label>Email Address</label>
+                    <input type="email" name="email" class="form-control" required placeholder="john@company.com">
+                </div>
+                <div class="form-group">
+                    <label>Upload Chip Photo (Optional - AI will identify it)</label>
+                    <input type="file" name="chip_image" class="form-control" accept="image/*">
+                </div>
+                <div class="form-group">
+                    <label>Message / Part Number</label>
+                    <textarea name="message" class="form-control" required placeholder="Tell us what you need... (e.g. 1000x STM32F103C8T6)"></textarea>
+                </div>
+                
+                <!-- 保留原有的防黑客验证码 -->
+                <div class="form-group" style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 10px; border: 1px dashed var(--glass-border);">
+                    <label style="color: var(--primary);">Security Check: What is {{ num1 }} + {{ num2 }}?</label>
+                    <input type="number" name="captcha" class="form-control" required placeholder="Enter the answer">
+                    {% if error %}
+                        <div class="error-msg">{{ error }}</div>
+                    {% endif %}
+                </div>
+                
+                <button type="submit" class="btn-primary" style="width: 100%; border-radius: 10px;">Send Inquiry</button>
+            </form>
+        </div>
+    </section>
+
+    <div class="footer">
+        © 2026 QuarkTwin Electronic Co., Ltd. All rights reserved.
     </div>
 
-    <!-- 产品区 -->
-    <div class="container py-5" id="products">
-        <h2 class="text-center mb-5">Our Core Products</h2>
-        <div class="row g-4">
-            <div class="col-md-4">
-                <div class="card h-100 border-0 shadow-sm">
-                    <div class="card-body text-center p-4">
-                        <h4 class="card-title">IC Chips</h4>
-                        <p class="card-text text-muted">High-performance microcontrollers and integrated circuits.</p>
-                    </div>
-                </div>
-            </div>
-            <div class="col-md-4">
-                <div class="card h-100 border-0 shadow-sm">
-                    <div class="card-body text-center p-4">
-                        <h4 class="card-title">Connectors</h4>
-                        <p class="card-text text-muted">Reliable and durable connectors for harsh environments.</p>
-                    </div>
-                </div>
-            </div>
-            <div class="col-md-4">
-                <div class="card h-100 border-0 shadow-sm">
-                    <div class="card-body text-center p-4">
-                        <h4 class="card-title">Sensors</h4>
-                        <p class="card-text text-muted">Precision sensors for IoT and industrial automation.</p>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- 表单区 -->
-    <div class="bg-light py-5" id="contact">
-        <div class="container">
-            <div class="row justify-content-center">
-                <div class="col-md-6">
-                    <div class="card border-0 shadow">
-                        <div class="card-body p-5">
-                            <h3 class="text-center mb-4">Get a Quote</h3>
-                            <form action="/submit" method="POST" enctype="multipart/form-data">
-                                <div class="mb-3">
-                                    <input type="text" class="form-control form-control-lg" name="name" placeholder="Your Name" required>
-                                </div>
-                                <div class="mb-3">
-                                    <input type="email" class="form-control form-control-lg" name="email" placeholder="Your Email" required>
-                                </div>
-                                <div class="mb-3">
-                                    <textarea class="form-control form-control-lg" name="message" rows="3" placeholder="Requirement Details" required></textarea>
-                                    <div class="mb-3">
-    <label class="form-label">Upload Chip Photo (Optional)</label>
-    <input class="form-control form-control-lg" type="file" name="chip_image" accept="image/*">
-</div>
-                                </div>
-                                                        <div class="mb-3">
-                            <label class="form-label">Security Check: What is {{ num1 }} + {{ num2 }}?</label>
-                            <input type="number" class="form-control form-control-lg" name="captcha" required placeholder="Enter the answer">
-                            {% if error %}
-                                <div style="color:red; margin-top:5px;">{{ error }}</div>
-                            {% endif %}
-                        </div>
-                                <button type="submit" class="btn btn-primary btn-lg w-100">Submit Inquiry</button>
-                            </form>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- 引入 AOS JS 并启动动画 -->
+    <script src="https://unpkg.com/aos@2.3.1/dist/aos.js"></script>
+    <script>
+        AOS.init();
+    </script>
 </body>
 </html>
