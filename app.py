@@ -335,7 +335,7 @@ def checkout():
     
     try:
         checkout_session = stripe.checkout.Session.create(
-            payment_method_types=['card'],
+            allowed_payment_method_types=['card'],
             line_items=line_items,
             mode='payment',
             customer_email=email,
