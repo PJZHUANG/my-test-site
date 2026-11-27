@@ -14,19 +14,20 @@ import ssl
 import time
 import json
 import random
-
-app = Flask(__name__)
+# 🚀 引入防刷限流库
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
-# ... (在 app = Flask(__name__) 下面) ...
+app = Flask(__name__)
+app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'top_secret_quarktwin_key_2026')
+
+# 🚀 初始化限流器
 limiter = Limiter(
     get_remote_address,
     app=app,
     default_limits=["200 per day", "50 per hour"],
     storage_uri="memory://"
 )
-app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'top_secret_quarktwin_key_2026')
 
 DEEPSEEK_API_KEY = os.environ.get('DEEPSEEK_API_KEY', '')
 SMTP_USER = os.environ.get('SMTP_USER', '')
@@ -99,6 +100,59 @@ def submit():
         return "<div style='text-align:center; margin-top:100px;'><h2 style='color:green;'>Thank you! Inquiry received.</h2><a href='/'>Home</a></div>"
     except Exception as e:
         return f"<h2>Oops! Error: {str(e)}</h2>", 500
+
+# 🚀 查单路由
+@app.route('/track', methods=['GET', 'POST'])
+def track_order():
+    orders = []
+    if request.method == 'POST':
+        email = request.form['email']
+        db = get_db()
+        cursor = db.cursor()
+        cursor.execute("""
+            SELECT o.id, o.total_amount, o.status, o.created_at, 
+                   GROUP_CONCAT(CONCAT(p.name, ' (x', i.quantity, ')') SEPARATOR '<br>') as items
+            FROM shop_orders o
+            LEFT JOIN shop_order_items i ON o.id = i.order_id
+            LEFT JOIN shop_products p ON i.product_id = p.id
+            WHERE o.customer_email = %s
+            GROUP BY o.id ORDER BY o.id DESC
+        """, (email,))
+        orders = cursor.fetchall()
+        db.close()
+    return render_template('track.html', orders=orders)
+
+# 🚀 AI 客服接口（带防刷限制）
+@app.route('/api/chat', methods=['POST'])
+@limiter.limit("5 per minute")
+def chat():
+    data = request.get_json()
+    user_message = data.get('message', '')
+    if not user_message:
+        return jsonify({"response": "Please enter a message."}), 400
+        
+    try:
+        db = get_db()
+        cursor = db.cursor()
+        cursor.execute("SELECT model, price FROM shop_products")
+        products = cursor.fetchall()
+        product_list = "\n".join([f"- {p[0]}: ${p[1]}" for p in products])
+        db.close()
+
+        headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
+        prompt = f"""你是QuarkTwin（一家深圳顶尖电子元器件供应商）的专业AI客服。
+        你的语气要热情、专业、简洁。如果客户问产品，请参考以下我们的库存库：
+        {product_list}
+        如果客户需要报价或买更多，请引导他们留下邮箱（让他们填底部的询盘表单或去商城下单）。
+        客户说：'{user_message}'
+        请用英文直接回复客户，不要废话。"""
+        payload = {"model": "deepseek-chat", "messages": [{"role": "user", "content": prompt}], "temperature": 0.7}
+        response = requests.post("https://api.deepseek.com/chat/completions", headers=headers, json=payload)
+        ai_content = response.json()['choices'][0]['message']['content']
+        
+        return jsonify({"response": ai_content})
+    except Exception as e:
+        return jsonify({"response": "Sorry, I am having network issues. Please leave an inquiry via the form below."}), 500
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -290,6 +344,7 @@ def product_detail(product_id):
         return render_template('product.html', product=product)
     except Exception as e:
         return f"<h2>Error: {str(e)}</h2>", 500
+
 @app.route('/add_to_cart/<int:product_id>')
 def add_to_cart(product_id):
     cart = session.get('cart', {})
@@ -487,6 +542,12 @@ def add_product():
     db.close()
     return redirect(url_for('admin_products'))
 
+@app.route('/admin/dashboard')
+def admin_dashboard():
+    if not session.get('logged_in') or session.get('role') != 'boss':
+        return "Access Denied", 403
+    return render_template('dashboard.html')
+
 @app.route('/admin/bulk_email', methods=['GET', 'POST'])
 def bulk_email():
     if not session.get('logged_in') or session.get('role') != 'boss':
@@ -577,11 +638,6 @@ def sitemap():
     xml += '</urlset>'
     return Response(xml, mimetype='application/xml')
 
-@app.route('/admin/dashboard')
-def admin_dashboard():
-    if not session.get('logged_in') or session.get('role') != 'boss':
-        return "Access Denied", 403
-    return render_template('dashboard.html')
 @app.route('/admin')
 def admin():
     if not session.get('logged_in'):
@@ -697,67 +753,5 @@ def admin():
     except Exception as e:
         return f"<h2>Database Error: {str(e)}</h2>", 500
 
-# ==========================================
-# 🚀 悬浮 AI 客服聊天 API
-# ==========================================
-@app.route('/api/chat', methods=['POST'])
-@app.route('/api/chat', methods=['POST'])
-@limiter.limit("5 per minute")  # 🚀 核心：限制每分钟最多 5 次请求
-def chat():
-    # ... 原有代码 ...
-def chat():
-    data = request.get_json()
-    user_message = data.get('message', '')
-    if not user_message:
-        return jsonify({"response": "Please enter a message."}), 400
-        
-    try:
-        # 查一下产品库，让客服知道我们卖什么
-        db = get_db()
-        cursor = db.cursor()
-        cursor.execute("SELECT model, price FROM shop_products")
-        products = cursor.fetchall()
-        product_list = "\n".join([f"- {p[0]}: ${p[1]}" for p in products])
-        db.close()
-
-        headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
-        # 设定 AI 客服的人设和系统指令
-        prompt = f"""你是QuarkTwin（一家深圳顶尖电子元器件供应商）的专业AI客服。
-        你的语气要热情、专业、简洁。如果客户问产品，请参考以下我们的库存库：
-        {product_list}
-        如果客户需要报价或买更多，请引导他们留下邮箱（让他们填底部的询盘表单或去商城下单）。
-        客户说：'{user_message}'
-        请用英文直接回复客户，不要废话。"""
-
-        payload = {
-            "model": "deepseek-chat",
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.7
-        }
-        response = requests.post("https://api.deepseek.com/chat/completions", headers=headers, json=payload)
-        ai_content = response.json()['choices'][0]['message']['content']
-        
-        return jsonify({"response": ai_content})
-    except Exception as e:
-        return jsonify({"response": "Sorry, I am having network issues. Please leave an inquiry via the form below."}), 500
-@app.route('/track', methods=['GET', 'POST'])
-def track_order():
-    orders = []
-    if request.method == 'POST':
-        email = request.form['email']
-        db = get_db()
-        cursor = db.cursor()
-        cursor.execute("""
-            SELECT o.id, o.total_amount, o.status, o.created_at, 
-                   GROUP_CONCAT(CONCAT(p.name, ' (x', i.quantity, ')') SEPARATOR '<br>') as items
-            FROM shop_orders o
-            LEFT JOIN shop_order_items i ON o.id = i.order_id
-            LEFT JOIN shop_products p ON i.product_id = p.id
-            WHERE o.customer_email = %s
-            GROUP BY o.id ORDER BY o.id DESC
-        """, (email,))
-        orders = cursor.fetchall()
-        db.close()
-    return render_template('track.html', orders=orders)
 if __name__ == '__main__':
     app.run()
