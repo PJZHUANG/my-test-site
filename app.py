@@ -1,6 +1,6 @@
 import stripe
 import os
-from flask import Flask, request, render_template, redirect, url_for, session, make_response, Response
+from flask import Flask, request, render_template, redirect, url_for, session, make_response, Response, jsonify
 import pymysql
 import pandas as pd
 from io import BytesIO
@@ -687,5 +687,44 @@ def admin():
     except Exception as e:
         return f"<h2>Database Error: {str(e)}</h2>", 500
 
+# ==========================================
+# 🚀 悬浮 AI 客服聊天 API
+# ==========================================
+@app.route('/api/chat', methods=['POST'])
+def chat():
+    data = request.get_json()
+    user_message = data.get('message', '')
+    if not user_message:
+        return jsonify({"response": "Please enter a message."}), 400
+        
+    try:
+        # 查一下产品库，让客服知道我们卖什么
+        db = get_db()
+        cursor = db.cursor()
+        cursor.execute("SELECT model, price FROM shop_products")
+        products = cursor.fetchall()
+        product_list = "\n".join([f"- {p[0]}: ${p[1]}" for p in products])
+        db.close()
+
+        headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
+        # 设定 AI 客服的人设和系统指令
+        prompt = f"""你是QuarkTwin（一家深圳顶尖电子元器件供应商）的专业AI客服。
+        你的语气要热情、专业、简洁。如果客户问产品，请参考以下我们的库存库：
+        {product_list}
+        如果客户需要报价或买更多，请引导他们留下邮箱（让他们填底部的询盘表单或去商城下单）。
+        客户说：'{user_message}'
+        请用英文直接回复客户，不要废话。"""
+
+        payload = {
+            "model": "deepseek-chat",
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.7
+        }
+        response = requests.post("https://api.deepseek.com/chat/completions", headers=headers, json=payload)
+        ai_content = response.json()['choices'][0]['message']['content']
+        
+        return jsonify({"response": ai_content})
+    except Exception as e:
+        return jsonify({"response": "Sorry, I am having network issues. Please leave an inquiry via the form below."}), 500
 if __name__ == '__main__':
     app.run()
