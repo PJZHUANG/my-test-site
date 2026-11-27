@@ -1,6 +1,6 @@
 import stripe
 import os
-from flask import Flask, request, render_template, redirect, url_for, session, make_response
+from flask import Flask, request, render_template, redirect, url_for, session, make_response, Response
 import pymysql
 import pandas as pd
 from io import BytesIO
@@ -464,6 +464,96 @@ def add_product():
     db.close()
     return redirect(url_for('admin_products'))
 
+@app.route('/admin/bulk_email', methods=['GET', 'POST'])
+def bulk_email():
+    if not session.get('logged_in') or session.get('role') != 'boss':
+        return "Access Denied", 403
+        
+    if request.method == 'POST':
+        subject = request.form['subject']
+        prompt = request.form['prompt']
+        
+        db = get_db()
+        cursor = db.cursor()
+        cursor.execute("SELECT DISTINCT email FROM customers WHERE email != ''")
+        emails = [row[0] for row in cursor.fetchall()]
+        db.close()
+        
+        if not emails:
+            return "<h2>No customers found in database.</h2>"
+            
+        headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
+        ai_prompt = f"你是一家深圳顶尖电子元器件供应商（QuarkTwin）的销售总监。请写一封英文营销邮件。营销主题是：'{prompt}'。要求语气热情、专业，有吸引力，直接输出邮件正文。"
+        data = {"model": "deepseek-chat", "messages": [{"role": "user", "content": ai_prompt}], "temperature": 0.7}
+        
+        try:
+            res = requests.post("https://api.deepseek.com/chat/completions", headers=headers, json=data)
+            ai_content = res.json()['choices'][0]['message']['content']
+            
+            context = ssl._create_unverified_context()
+            server = smtplib.SMTP_SSL('smtp.qiye.163.com', 465, context=context)
+            server.login(SMTP_USER, SMTP_PASS)
+            
+            success_count = 0
+            for email in emails:
+                msg = MIMEText(ai_content, 'plain', 'utf-8')
+                msg['Subject'] = Header(subject, 'utf-8')
+                msg['From'] = SMTP_USER
+                msg['To'] = email
+                server.sendmail(SMTP_USER, [email], msg.as_string())
+                success_count += 1
+                time.sleep(1)
+                
+            server.quit()
+            return f"<h2 style='color:green;'>✅ Marketing emails sent to {success_count} customers successfully!</h2><a href='/admin'>Back to Admin</a>"
+        except Exception as e:
+            return f"<h2>Email Error: {str(e)}</h2>"
+            
+    return """
+    <html><head><title>Bulk Email</title><link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet"></head>
+    <body class="p-5 bg-light">
+        <div class="container" style="max-width: 800px;">
+            <h2 class="mb-4">📧 AI Marketing Email Campaign</h2>
+            <a href="/admin" class="btn btn-secondary mb-3">← Back to Admin</a>
+            <div class="card shadow-sm p-4">
+                <form method="POST">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Email Subject (标题)</label>
+                        <input type="text" name="subject" class="form-control" required placeholder="e.g. Summer Sale - 20% Off All STM32 Chips!">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Marketing Prompt for AI (告诉 AI 你想推销什么)</label>
+                        <textarea name="prompt" class="form-control" rows="4" required placeholder="e.g. Write an email promoting our new stock of STM32F103C8T6 chips. Mention that we are offering a 20% discount this week and we guarantee 100% authenticity."></textarea>
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100 py-2">🚀 Generate & Send to All Customers</button>
+                </form>
+            </div>
+        </div>
+    </body></html>
+    """
+
+@app.route('/robots.txt')
+def robots():
+    content = "User-agent: *\nAllow: /\nSitemap: https://pjzhuang.com/sitemap.xml"
+    return Response(content, mimetype="text/plain")
+
+@app.route('/sitemap.xml')
+def sitemap():
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute("SELECT id FROM shop_products")
+    products = cursor.fetchall()
+    db.close()
+    
+    xml = '<?xml version="1.0" encoding="UTF-8"?>\n'
+    xml += '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+    xml += '  <url>\n    <loc>https://pjzhuang.com/</loc>\n    <changefreq>daily</changefreq>\n    <priority>1.0</priority>\n  </url>\n'
+    xml += '  <url>\n    <loc>https://pjzhuang.com/shop</loc>\n    <changefreq>daily</changefreq>\n    <priority>0.9</priority>\n  </url>\n'
+    for p in products:
+        xml += f'  <url>\n    <loc>https://pjzhuang.com/product/{p[0]}</loc>\n    <priority>0.8</priority>\n  </url>\n'
+    xml += '</urlset>'
+    return Response(xml, mimetype='application/xml')
+
 @app.route('/admin')
 def admin():
     if not session.get('logged_in'):
@@ -491,7 +581,7 @@ def admin():
         sales_users = [u[0] for u in cursor.fetchall()]
         db.close()
         
-                action_btns = ""
+        action_btns = ""
         if session.get('role') == 'boss':
             action_btns = """
             <a href="/admin/orders" style="background-color: #0d6efd; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px; margin-right: 10px;">📦 VIEW ORDERS</a>
@@ -578,107 +668,5 @@ def admin():
     except Exception as e:
         return f"<h2>Database Error: {str(e)}</h2>", 500
 
-from flask import Response
-
-# 🚀 1. 告诉 Google 爬虫哪些页面可以抓取
-@app.route('/robots.txt')
-def robots():
-    content = "User-agent: *\nAllow: /\nSitemap: https://pjzhuang.com/sitemap.xml"
-    return Response(content, mimetype="text/plain")
-
-# 🚀 2. 生成网站地图，自动包含所有产品页
-@app.route('/sitemap.xml')
-def sitemap():
-    db = get_db()
-    cursor = db.cursor()
-    cursor.execute("SELECT id FROM shop_products")
-    products = cursor.fetchall()
-    db.close()
-    
-    xml = '<?xml version="1.0" encoding="UTF-8"?>\n'
-    xml += '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
-    
-    # 首页
-    xml += '  <url>\n    <loc>https://pjzhuang.com/</loc>\n    <changefreq>daily</changefreq>\n    <priority>1.0</priority>\n  </url>\n'
-    # 商城页
-    xml += '  <url>\n    <loc>https://pjzhuang.com/shop</loc>\n    <changefreq>daily</changefreq>\n    <priority>0.9</priority>\n  </url>\n'
-    
-    # 循环加入所有商品页（假设以后我们会做单品详情页）
-    for p in products:
-        xml += f'  <url>\n    <loc>https://pjzhuang.com/product/{p[0]}</loc>\n    <priority>0.8</priority>\n  </url>\n'
-        
-    xml += '</urlset>'
-    return Response(xml, mimetype='application/xml')
-# 🚀 全自动 EDM 邮件群发
-@app.route('/admin/bulk_email', methods=['GET', 'POST'])
-def bulk_email():
-    if not session.get('logged_in') or session.get('role') != 'boss':
-        return "Access Denied", 403
-        
-    if request.method == 'POST':
-        subject = request.form['subject']
-        prompt = request.form['prompt']
-        
-        db = get_db()
-        cursor = db.cursor()
-        cursor.execute("SELECT DISTINCT email FROM customers WHERE email != ''")
-        emails = [row[0] for row in cursor.fetchall()]
-        db.close()
-        
-        if not emails:
-            return "<h2>No customers found in database.</h2>"
-            
-        # 让 AI 根据您的营销主题，生成一封完美的英文推销信
-        headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
-        ai_prompt = f"你是一家深圳顶尖电子元器件供应商（QuarkTwin）的销售总监。请写一封英文营销邮件。营销主题是：'{prompt}'。要求语气热情、专业，有吸引力，直接输出邮件正文。"
-        data = {"model": "deepseek-chat", "messages": [{"role": "user", "content": ai_prompt}], "temperature": 0.7}
-        
-        try:
-            res = requests.post("https://api.deepseek.com/chat/completions", headers=headers, json=data)
-            ai_content = res.json()['choices'][0]['message']['content']
-            
-            # 准备发送邮件
-            context = ssl._create_unverified_context()
-            server = smtplib.SMTP_SSL('smtp.qiye.163.com', 465, context=context)
-            server.login(SMTP_USER, SMTP_PASS)
-            
-            success_count = 0
-            for email in emails:
-                msg = MIMEText(ai_content, 'plain', 'utf-8')
-                msg['Subject'] = Header(subject, 'utf-8')
-                msg['From'] = SMTP_USER
-                msg['To'] = email
-                server.sendmail(SMTP_USER, [email], msg.as_string())
-                success_count += 1
-                time.sleep(1) # 防止发送过快被网易封号
-                
-            server.quit()
-            return f"<h2 style='color:green;'>✅ Marketing emails sent to {success_count} customers successfully!</h2><a href='/admin'>Back to Admin</a>"
-        except Exception as e:
-            return f"<h2>Email Error: {str(e)}</h2>"
-            
-    # GET 请求：展示群发页面
-    return """
-    <html><head><title>Bulk Email</title><link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet"></head>
-    <body class="p-5 bg-light">
-        <div class="container" style="max-width: 800px;">
-            <h2 class="mb-4">📧 AI Marketing Email Campaign</h2>
-            <a href="/admin" class="btn btn-secondary mb-3">← Back to Admin</a>
-            <div class="card shadow-sm p-4">
-                <form method="POST">
-                    <div class="mb-3">
-                        <label class="form-label fw-bold">Email Subject (标题)</label>
-                        <input type="text" name="subject" class="form-control" required placeholder="e.g. Summer Sale - 20% Off All STM32 Chips!">
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label fw-bold">Marketing Prompt for AI (告诉 AI 你想推销什么)</label>
-                        <textarea name="prompt" class="form-control" rows="4" required placeholder="e.g. Write an email promoting our new stock of STM32F103C8T6 chips. Mention that we are offering a 20% discount this week and we guarantee 100% authenticity."></textarea>
-                    </div>
-                    <button type="submit" class="btn btn-primary w-100 py-2">🚀 Generate & Send to All Customers</button>
-                </form>
-            </div>
-        </div>
-    </body></html>
-    """
 if __name__ == '__main__':
     app.run()
