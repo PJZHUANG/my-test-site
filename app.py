@@ -131,7 +131,7 @@ def track_order():
     return render_template('track.html', orders=orders, error_msg=error_msg)
 
 @app.route('/api/chat', methods=['POST'])
-@limiter.limit("5 per minute", key_func=lambda: "GLOBAL_LIMIT_ONE_IP")  # 🚀 强制全局锁死
+@limiter.limit("5 per minute", key_func=lambda: "GLOBAL_LIMIT_ONE_IP")
 def chat():
     data = request.get_json()
     user_message = data.get('message', '')
@@ -146,13 +146,30 @@ def chat():
         product_list = "\n".join([f"- {p[0]}: ${p[1]}" for p in products])
         db.close()
 
+        # 🚀 核心：读取公司的“私有知识库”
+        knowledge_content = ""
+        knowledge_path = "/var/www/html/company_knowledge.txt"
+        if os.path.exists(knowledge_path):
+            with open(knowledge_path, 'r', encoding='utf-8') as f:
+                knowledge_content = f.read()
+
         headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
+        
+        # 🚀 终极提示词：把知识库塞进 AI 的大脑
         prompt = f"""你是QuarkTwin（一家深圳顶尖电子元器件供应商）的专业AI客服。
-        你的语气要热情、专业、简洁。如果客户问产品，请参考以下我们的库存库：
+        你的语气要热情、专业、简洁。
+        
+        【我们的库存库】：
         {product_list}
-        如果客户需要报价或买更多，请引导他们留下邮箱（让他们填底部的询盘表单或去商城下单）。
+        
+        【公司业务规则与常见问题】：
+        {knowledge_content}
+        
+        请结合上述所有的库存信息和公司规则，回答客户的问题。如果客户需要报价或买更多，请引导他们留下邮箱（让他们填底部的询盘表单或去商城下单）。
+        
         客户说：'{user_message}'
         请用英文直接回复客户，不要废话。"""
+
         payload = {"model": "deepseek-chat", "messages": [{"role": "user", "content": prompt}], "temperature": 0.7}
         response = requests.post("https://api.deepseek.com/chat/completions", headers=headers, json=payload)
         ai_content = response.json()['choices'][0]['message']['content']
