@@ -131,7 +131,6 @@ def track_order():
 
 # 🚀 AI 客服接口（带防刷限制）
 @app.route('/api/chat', methods=['POST'])
-@limiter.limit("5 per minute")
 def chat():
     data = request.get_json()
     user_message = data.get('message', '')
