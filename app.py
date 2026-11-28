@@ -131,7 +131,7 @@ def track_order():
     return render_template('track.html', orders=orders, error_msg=error_msg)
 
 @app.route('/api/chat', methods=['POST'])
-@limiter.limit("5 per minute") # 🚀 AI 专属限流
+@limiter.limit("5 per minute", key_func=lambda: "GLOBAL_LIMIT_ONE_IP")  # 🚀 强制全局锁死
 def chat():
     data = request.get_json()
     user_message = data.get('message', '')
