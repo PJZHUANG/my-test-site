@@ -14,18 +14,17 @@ import ssl
 import time
 import json
 import random
-# 🚀 引入防刷限流库
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'top_secret_quarktwin_key_2026')
 
-# 🚀 初始化限流器
+# 🚀 终极防盗网：全局限流，大门敞开，但一分钟超过20次直接拦截
 limiter = Limiter(
     get_remote_address,
     app=app,
-    default_limits=[],
+    default_limits=["20 per minute"],
     storage_uri="memory://"
 )
 
@@ -34,7 +33,6 @@ SMTP_USER = os.environ.get('SMTP_USER', '')
 SMTP_PASS = os.environ.get('SMTP_PASS', '')
 ZHIPU_API_KEY = os.environ.get('ZHIPU_API_KEY', '')
 WEBHOOK_URL = os.environ.get('WEBHOOK_URL', '')
-
 STRIPE_SECRET_KEY = os.environ.get('STRIPE_SECRET_KEY', '')
 stripe.api_key = STRIPE_SECRET_KEY
 
@@ -45,6 +43,9 @@ def allowed_file(filename):
 def get_db():
     return pymysql.connect(host='localhost', user='appuser', password='Bta3456789', database='quarktwin_crm', charset='utf8mb4')
 
+# ==========================================
+# 1. 前台首页与询盘
+# ==========================================
 @app.route('/')
 def index():
     num1 = random.randint(1, 10)
@@ -101,7 +102,9 @@ def submit():
     except Exception as e:
         return f"<h2>Oops! Error: {str(e)}</h2>", 500
 
-# 🚀 查单路由
+# ==========================================
+# 2. 查单与 AI 客服
+# ==========================================
 @app.route('/track', methods=['GET', 'POST'])
 def track_order():
     orders = []
@@ -111,7 +114,6 @@ def track_order():
             email = request.form['email']
             db = get_db()
             cursor = db.cursor()
-            # 增加了 GROUP BY 的严格限制，防止 MySQL 报错
             cursor.execute("""
                 SELECT o.id, o.total_amount, o.status, o.created_at, 
                        GROUP_CONCAT(CONCAT(p.name, ' (x', i.quantity, ')') SEPARATOR '<br>') as items
@@ -126,12 +128,10 @@ def track_order():
             db.close()
         except Exception as e:
             error_msg = f"查单报错啦，具体原因: {str(e)}"
-            
     return render_template('track.html', orders=orders, error_msg=error_msg)
 
-# 🚀 AI 客服接口（带防刷限制）
 @app.route('/api/chat', methods=['POST'])
-@limiter.limit("5 per minute")
+@limiter.limit("5 per minute") # 🚀 AI 专属限流
 def chat():
     data = request.get_json()
     user_message = data.get('message', '')
@@ -159,8 +159,11 @@ def chat():
         
         return jsonify({"response": ai_content})
     except Exception as e:
-        return jsonify({"response": "Sorry, I am having network issues. Please leave an inquiry via the form below."}), 500
+        return jsonify({"response": "Sorry, I am having network issues."}), 500
 
+# ==========================================
+# 3. 登录与权限
+# ==========================================
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
@@ -184,6 +187,9 @@ def logout():
     session.clear()
     return redirect(url_for('login'))
 
+# ==========================================
+# 4. 后台操作：分配、状态、导出、AI回复、邮件群发、跟进
+# ==========================================
 @app.route('/export')
 def export_excel():
     if not session.get('logged_in') or session.get('role') != 'boss':
@@ -219,8 +225,8 @@ def ai_reply(customer_id):
         cursor.execute("SELECT model, brand, price FROM products")
         products = cursor.fetchall()
         product_list = "\n".join([f"- {p[0]} ({p[1]}): 成本价 ${p[2]}" for p in products])
-        
         db.close()
+        
         if not row:
             return "Customer not found", 404
             
@@ -326,6 +332,63 @@ def update_status(customer_id, status):
     db.close()
     return redirect(url_for('admin'))
 
+# 🚀 跟进记录
+@app.route('/admin/follow_up/<int:customer_id>', methods=['GET', 'POST'])
+def follow_up(customer_id):
+    if not session.get('logged_in'):
+        return redirect(url_for('login'))
+    db = get_db()
+    cursor = db.cursor()
+    
+    if request.method == 'POST':
+        content = request.form['content']
+        cursor.execute("INSERT INTO customer_follow_ups (customer_id, sales_username, content) VALUES (%s, %s, %s)", 
+                       (customer_id, session.get('username'), content))
+        db.commit()
+        
+    cursor.execute("SELECT name, email FROM customers WHERE id = %s", (customer_id,))
+    customer = cursor.fetchone()
+    cursor.execute("SELECT sales_username, content, created_at FROM customer_follow_ups WHERE customer_id = %s ORDER BY id DESC", (customer_id,))
+    logs = cursor.fetchall()
+    db.close()
+    
+    logs_html = ""
+    for log in logs:
+        logs_html += f"""
+        <div class="card mb-3 shadow-sm border-0">
+            <div class="card-body">
+                <h6 class="card-subtitle mb-2 text-primary fw-bold">{log[0]} <span class="text-muted fw-normal" style="font-size:12px;">{str(log[2])[:16]}</span></h6>
+                <p class="card-text">{log[1]}</p>
+            </div>
+        </div>
+        """
+        
+    return f"""
+    <html><head><title>Follow Up</title><link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet"></head>
+    <body class="p-5 bg-light">
+        <div class="container" style="max-width: 800px;">
+            <a href="/admin" class="btn btn-secondary mb-3">← Back to Inquiries</a>
+            <h2 class="mb-4">📝 Follow-up Log: {customer[0]} ({customer[1]})</h2>
+            <div class="card mb-4 shadow-sm">
+                <div class="card-body">
+                    <form method="POST">
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">Add New Log</label>
+                            <textarea name="content" class="form-control" rows="3" placeholder="What did you discuss?" required></textarea>
+                        </div>
+                        <button type="submit" class="btn btn-primary">Save Log</button>
+                    </form>
+                </div>
+            </div>
+            <h4>History</h4>
+            {logs_html if logs else '<p class="text-muted">No logs yet.</p>'}
+        </div>
+    </body></html>
+    """
+
+# ==========================================
+# 5. 商城与支付
+# ==========================================
 @app.route('/shop')
 def shop():
     try:
@@ -364,7 +427,6 @@ def cart():
     cart = session.get('cart', {})
     if not cart:
         return "<h3>Your cart is empty. <a href='/shop'>Go Shopping</a></h3>"
-    
     db = get_db()
     cursor = db.cursor()
     items = []
@@ -384,14 +446,11 @@ def checkout():
     cart = session.get('cart', {})
     if not cart:
         return redirect(url_for('shop'))
-    
     email = request.form['email']
     db = get_db()
     cursor = db.cursor()
-    
     total_amount = 0
     line_items = []
-    
     for pid, qty in cart.items():
         cursor.execute("SELECT name, price FROM shop_products WHERE id = %s", (pid,))
         product = cursor.fetchone()
@@ -399,34 +458,23 @@ def checkout():
             price = product[1]
             total_amount += price * qty
             line_items.append({
-                'price_data': {
-                    'currency': 'usd',
-                    'product_data': {'name': product[0]},
-                    'unit_amount': int(float(price) * 100),
-                },
+                'price_data': {'currency': 'usd', 'product_data': {'name': product[0]}, 'unit_amount': int(float(price) * 100)},
                 'quantity': qty,
             })
-            
     cursor.execute("INSERT INTO shop_orders (customer_email, total_amount, status) VALUES (%s, %s, 'Pending Payment')", (email, total_amount))
     order_id = cursor.lastrowid
-    
     for pid, qty in cart.items():
         cursor.execute("SELECT price FROM shop_products WHERE id = %s", (pid,))
         price = cursor.fetchone()[0]
         cursor.execute("INSERT INTO shop_order_items (order_id, product_id, quantity, price) VALUES (%s, %s, %s, %s)", (order_id, pid, qty, price))
-        
     db.commit()
     db.close()
-    
     try:
         checkout_session = stripe.checkout.Session.create(
             allowed_payment_method_types=['card'],
-            line_items=line_items,
-            mode='payment',
-            customer_email=email,
+            line_items=line_items, mode='payment', customer_email=email,
             success_url=url_for('success', order_id=order_id, _external=True),
-            cancel_url=url_for('cart', _external=True),
-            client_reference_id=str(order_id)
+            cancel_url=url_for('cart', _external=True), client_reference_id=str(order_id)
         )
         return redirect(checkout_session.url, code=303)
     except Exception as e:
@@ -442,48 +490,33 @@ def success():
         db.commit()
         db.close()
         session.pop('cart', None)
-        
     return f"<div style='text-align:center; margin-top:100px;'><h2 style='color:green;'>🎉 Payment Successful!</h2><p>Your order has been received. We will ship it soon.</p><a href='/shop'>Back to Shop</a></div>"
 
+# ==========================================
+# 6. 老板后台：订单、产品、大屏、群发、业绩
+# ==========================================
 @app.route('/admin/orders')
 def admin_orders():
     if not session.get('logged_in') or session.get('role') != 'boss':
         return "Access Denied", 403
-    
     db = get_db()
     cursor = db.cursor()
     cursor.execute("""
         SELECT o.id, o.customer_email, o.total_amount, o.status, o.created_at, 
                GROUP_CONCAT(CONCAT(p.name, ' (x', i.quantity, ')') SEPARATOR '<br>') as items
-        FROM shop_orders o
-        JOIN shop_order_items i ON o.id = i.order_id
-        JOIN shop_products p ON i.product_id = p.id
-        GROUP BY o.id ORDER BY o.id DESC
+        FROM shop_orders o JOIN shop_order_items i ON o.id = i.order_id
+        JOIN shop_products p ON i.product_id = p.id GROUP BY o.id ORDER BY o.id DESC
     """)
     orders = cursor.fetchall()
     db.close()
-    
     html = """
     <html><head><title>Orders</title><link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet"></head>
-    <body class="p-5 bg-light">
-        <div class="container">
-            <h2 class="mb-4">📦 Order Management</h2>
-            <a href="/admin" class="btn btn-secondary mb-3">← Back to Inquiries</a>
-            <table class="table table-bordered bg-white shadow-sm">
-                <thead class="table-dark"><tr><th>Order ID</th><th>Customer Email</th><th>Items</th><th>Total</th><th>Status</th><th>Date</th></tr></thead>
-                <tbody>
+    <body class="p-5 bg-light"><div class="container"><h2 class="mb-4">📦 Order Management</h2>
+    <a href="/admin" class="btn btn-secondary mb-3">← Back</a>
+    <table class="table table-bordered bg-white shadow-sm"><thead class="table-dark"><tr><th>Order ID</th><th>Customer Email</th><th>Items</th><th>Total</th><th>Status</th><th>Date</th></tr></thead><tbody>
     """
     for row in orders:
-        html += f"""
-        <tr>
-            <td>#{row[0]}</td>
-            <td>{row[1]}</td>
-            <td>{row[5]}</td>
-            <td class="text-success fw-bold">${row[2]}</td>
-            <td><span class="badge bg-info text-dark">{row[3]}</span></td>
-            <td>{str(row[4])[:16]}</td>
-        </tr>
-        """
+        html += f"<tr><td>#{row[0]}</td><td>{row[1]}</td><td>{row[5]}</td><td class='text-success fw-bold'>${row[2]}</td><td><span class='badge bg-info text-dark'>{row[3]}</span></td><td>{str(row[4])[:16]}</td></tr>"
     html += "</tbody></table></div></body></html>"
     return html
 
@@ -491,39 +524,24 @@ def admin_orders():
 def admin_products():
     if not session.get('logged_in') or session.get('role') != 'boss':
         return "Access Denied", 403
-        
     db = get_db()
     cursor = db.cursor()
     cursor.execute("SELECT id, name, model, price, stock FROM shop_products ORDER BY id DESC")
     products = cursor.fetchall()
     db.close()
-    
     html = """
     <html><head><title>Products</title><link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet"></head>
-    <body class="p-5 bg-light">
-        <div class="container">
-            <h2 class="mb-4">🛒 Product Management</h2>
-            <a href="/admin" class="btn btn-secondary mb-3">← Back to Inquiries</a>
-            
-            <div class="card mb-4 shadow-sm">
-                <div class="card-body">
-                    <h5>Add New Product</h5>
-                    <form action="/admin/products/add" method="POST">
-                        <div class="row g-2">
-                            <div class="col-md-3"><input type="text" name="name" class="form-control" placeholder="Product Name" required></div>
-                            <div class="col-md-3"><input type="text" name="model" class="form-control" placeholder="Model (e.g. STM32)" required></div>
-                            <div class="col-md-2"><input type="number" step="0.01" name="price" class="form-control" placeholder="Price ($)" required></div>
-                            <div class="col-md-2"><input type="number" name="stock" class="form-control" placeholder="Stock" required></div>
-                            <div class="col-md-2"><button type="submit" class="btn btn-success w-100">Add</button></div>
-                        </div>
-                        <div class="mt-2"><input type="text" name="description" class="form-control" placeholder="Short Description" required></div>
-                    </form>
-                </div>
-            </div>
-
-            <table class="table table-bordered bg-white shadow-sm">
-                <thead class="table-dark"><tr><th>ID</th><th>Name</th><th>Model</th><th>Price</th><th>Stock</th></tr></thead>
-                <tbody>
+    <body class="p-5 bg-light"><div class="container"><h2 class="mb-4">🛒 Product Management</h2>
+    <a href="/admin" class="btn btn-secondary mb-3">← Back</a>
+    <div class="card mb-4 shadow-sm"><div class="card-body"><h5>Add New Product</h5>
+    <form action="/admin/products/add" method="POST"><div class="row g-2">
+    <div class="col-md-3"><input type="text" name="name" class="form-control" placeholder="Product Name" required></div>
+    <div class="col-md-3"><input type="text" name="model" class="form-control" placeholder="Model" required></div>
+    <div class="col-md-2"><input type="number" step="0.01" name="price" class="form-control" placeholder="Price ($)" required></div>
+    <div class="col-md-2"><input type="number" name="stock" class="form-control" placeholder="Stock" required></div>
+    <div class="col-md-2"><button type="submit" class="btn btn-success w-100">Add</button></div>
+    </div><div class="mt-2"><input type="text" name="description" class="form-control" placeholder="Short Description" required></div></form>
+    </div></div><table class="table table-bordered bg-white shadow-sm"><thead class="table-dark"><tr><th>ID</th><th>Name</th><th>Model</th><th>Price</th><th>Stock</th></tr></thead><tbody>
     """
     for row in products:
         html += f"<tr><td>{row[0]}</td><td>{row[1]}</td><td>{row[2]}</td><td>${row[3]}</td><td>{row[4]}</td></tr>"
@@ -534,17 +552,10 @@ def admin_products():
 def add_product():
     if not session.get('logged_in') or session.get('role') != 'boss':
         return "Access Denied", 403
-    
-    name = request.form['name']
-    model = request.form['model']
-    price = request.form['price']
-    stock = request.form['stock']
-    description = request.form['description']
-    
     db = get_db()
     cursor = db.cursor()
     cursor.execute("INSERT INTO shop_products (name, model, price, stock, description) VALUES (%s, %s, %s, %s, %s)", 
-                   (name, model, price, stock, description))
+                   (request.form['name'], request.form['model'], request.form['price'], request.form['stock'], request.form['description']))
     db.commit()
     db.close()
     return redirect(url_for('admin_products'))
@@ -555,36 +566,55 @@ def admin_dashboard():
         return "Access Denied", 403
     return render_template('dashboard.html')
 
+@app.route('/admin/performance')
+def admin_performance():
+    if not session.get('logged_in') or session.get('role') != 'boss':
+        return "Access Denied", 403
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute("""
+        SELECT u.username, 
+               (SELECT COUNT(*) FROM customers c WHERE c.assigned_to = u.username) as total_leads,
+               (SELECT COUNT(*) FROM customers c WHERE c.assigned_to = u.username AND c.status = 'Closed') as closed_deals
+        FROM users u WHERE u.role = 'sales'
+    """)
+    sales_data = cursor.fetchall()
+    db.close()
+    html = """
+    <html><head><title>Performance</title><link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet"></head>
+    <body class="p-5 bg-light"><div class="container"><h2 class="mb-4">🏆 Sales Performance</h2>
+    <a href="/admin" class="btn btn-secondary mb-3">← Back</a>
+    <table class="table table-bordered bg-white shadow-sm"><thead class="table-dark"><tr><th>Salesperson</th><th>Total Leads</th><th>Closed Deals</th><th>Conversion Rate</th></tr></thead><tbody>
+    """
+    for row in sales_data:
+        rate = f"{(row[2]/row[1]*100):.1f}%" if row[1] > 0 else "0%"
+        html += f"<tr><td>{row[0]}</td><td>{row[1]}</td><td class='text-success fw-bold'>{row[2]}</td><td>{rate}</td></tr>"
+    html += "</tbody></table></div></body></html>"
+    return html
+
 @app.route('/admin/bulk_email', methods=['GET', 'POST'])
 def bulk_email():
     if not session.get('logged_in') or session.get('role') != 'boss':
         return "Access Denied", 403
-        
     if request.method == 'POST':
         subject = request.form['subject']
         prompt = request.form['prompt']
-        
         db = get_db()
         cursor = db.cursor()
         cursor.execute("SELECT DISTINCT email FROM customers WHERE email != ''")
         emails = [row[0] for row in cursor.fetchall()]
         db.close()
-        
         if not emails:
-            return "<h2>No customers found in database.</h2>"
-            
+            return "<h2>No customers found.</h2>"
         headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
         ai_prompt = f"你是一家深圳顶尖电子元器件供应商（QuarkTwin）的销售总监。请写一封英文营销邮件。营销主题是：'{prompt}'。要求语气热情、专业，有吸引力，直接输出邮件正文。"
         data = {"model": "deepseek-chat", "messages": [{"role": "user", "content": ai_prompt}], "temperature": 0.7}
-        
         try:
             res = requests.post("https://api.deepseek.com/chat/completions", headers=headers, json=data)
             ai_content = res.json()['choices'][0]['message']['content']
-            
             context = ssl._create_unverified_context()
             server = smtplib.SMTP_SSL('smtp.qiye.163.com', 465, context=context)
             server.login(SMTP_USER, SMTP_PASS)
-            
             success_count = 0
             for email in emails:
                 msg = MIMEText(ai_content, 'plain', 'utf-8')
@@ -594,39 +624,23 @@ def bulk_email():
                 server.sendmail(SMTP_USER, [email], msg.as_string())
                 success_count += 1
                 time.sleep(1)
-                
             server.quit()
-            return f"<h2 style='color:green;'>✅ Marketing emails sent to {success_count} customers successfully!</h2><a href='/admin'>Back to Admin</a>"
+            return f"<h2 style='color:green;'>✅ Sent to {success_count} customers!</h2><a href='/admin'>Back</a>"
         except Exception as e:
             return f"<h2>Email Error: {str(e)}</h2>"
-            
     return """
     <html><head><title>Bulk Email</title><link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet"></head>
-    <body class="p-5 bg-light">
-        <div class="container" style="max-width: 800px;">
-            <h2 class="mb-4">📧 AI Marketing Email Campaign</h2>
-            <a href="/admin" class="btn btn-secondary mb-3">← Back to Admin</a>
-            <div class="card shadow-sm p-4">
-                <form method="POST">
-                    <div class="mb-3">
-                        <label class="form-label fw-bold">Email Subject (标题)</label>
-                        <input type="text" name="subject" class="form-control" required placeholder="e.g. Summer Sale - 20% Off All STM32 Chips!">
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label fw-bold">Marketing Prompt for AI (告诉 AI 你想推销什么)</label>
-                        <textarea name="prompt" class="form-control" rows="4" required placeholder="e.g. Write an email promoting our new stock of STM32F103C8T6 chips. Mention that we are offering a 20% discount this week and we guarantee 100% authenticity."></textarea>
-                    </div>
-                    <button type="submit" class="btn btn-primary w-100 py-2">🚀 Generate & Send to All Customers</button>
-                </form>
-            </div>
-        </div>
-    </body></html>
+    <body class="p-5 bg-light"><div class="container" style="max-width: 800px;"><h2 class="mb-4">📧 AI Marketing</h2>
+    <a href="/admin" class="btn btn-secondary mb-3">← Back</a>
+    <div class="card shadow-sm p-4"><form method="POST">
+    <div class="mb-3"><label class="form-label fw-bold">Subject</label><input type="text" name="subject" class="form-control" required></div>
+    <div class="mb-3"><label class="form-label fw-bold">Prompt for AI</label><textarea name="prompt" class="form-control" rows="4" required></textarea></div>
+    <button type="submit" class="btn btn-primary w-100 py-2">🚀 Generate & Send</button></form></div></div></body></html>
     """
 
 @app.route('/robots.txt')
 def robots():
-    content = "User-agent: *\nAllow: /\nSitemap: https://pjzhuang.com/sitemap.xml"
-    return Response(content, mimetype="text/plain")
+    return Response("User-agent: *\nAllow: /\nSitemap: https://pjzhuang.com/sitemap.xml", mimetype="text/plain")
 
 @app.route('/sitemap.xml')
 def sitemap():
@@ -635,11 +649,9 @@ def sitemap():
     cursor.execute("SELECT id FROM shop_products")
     products = cursor.fetchall()
     db.close()
-    
-    xml = '<?xml version="1.0" encoding="UTF-8"?>\n'
-    xml += '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
-    xml += '  <url>\n    <loc>https://pjzhuang.com/</loc>\n    <changefreq>daily</changefreq>\n    <priority>1.0</priority>\n  </url>\n'
-    xml += '  <url>\n    <loc>https://pjzhuang.com/shop</loc>\n    <changefreq>daily</changefreq>\n    <priority>0.9</priority>\n  </url>\n'
+    xml = '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+    xml += '  <url>\n    <loc>https://pjzhuang.com/</loc>\n    <priority>1.0</priority>\n  </url>\n'
+    xml += '  <url>\n    <loc>https://pjzhuang.com/shop</loc>\n    <priority>0.9</priority>\n  </url>\n'
     for p in products:
         xml += f'  <url>\n    <loc>https://pjzhuang.com/product/{p[0]}</loc>\n    <priority>0.8</priority>\n  </url>\n'
     xml += '</urlset>'
@@ -649,25 +661,19 @@ def sitemap():
 def admin():
     if not session.get('logged_in'):
         return redirect(url_for('login'))
-        
     try:
         db = get_db()
         cursor = db.cursor()
-        
         if session.get('role') == 'boss':
             cursor.execute("SELECT id, name, email, message, status, assigned_to, image_url FROM customers ORDER BY id DESC")
         else:
             cursor.execute("SELECT id, name, email, message, status, assigned_to, image_url FROM customers WHERE assigned_to = %s ORDER BY id DESC", (session.get('username'),))
-            
         rows = cursor.fetchall()
-        
         cursor.execute("SELECT status, COUNT(*) FROM customers GROUP BY status")
         status_counts = dict(cursor.fetchall())
-        
         pending_count = status_counts.get('Pending', 0)
         closed_count = status_counts.get('Closed', 0)
         total_count = len(rows)
-        
         cursor.execute("SELECT username FROM users WHERE role = 'sales'")
         sales_users = [u[0] for u in cursor.fetchall()]
         db.close()
@@ -675,40 +681,28 @@ def admin():
         action_btns = ""
         if session.get('role') == 'boss':
             action_btns = """
-            <a href="/admin/orders" style="background-color: #0d6efd; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px; margin-right: 10px;">📦 VIEW ORDERS</a>
-            <a href="/admin/products" style="background-color: #fd7e14; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px; margin-right: 10px;">🛒 MANAGE PRODUCTS</a>
-            <a href="/admin/bulk_email" style="background-color: #d63384; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px; margin-right: 10px;">📧 AI MARKETING</a>
-            <a href="/admin/dashboard" style="background-color: #6f42c1; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px; margin-right: 10px;">📊 BI DASHBOARD</a>
-            <a href="/export" style="background-color: #198754; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px; margin-right: 10px;">📥 EXPORT EXCEL</a>
+            <a href="/admin/orders" class="btn btn-primary btn-sm">📦 VIEW ORDERS</a>
+            <a href="/admin/products" class="btn btn-warning btn-sm">🛒 MANAGE PRODUCTS</a>
+            <a href="/admin/bulk_email" class="btn btn-danger btn-sm">📧 AI MARKETING</a>
+            <a href="/admin/dashboard" class="btn btn-info btn-sm">📊 BI DASHBOARD</a>
+            <a href="/admin/performance" class="btn btn-success btn-sm">🏆 SALES PERFORMANCE</a>
+            <a href="/export" class="btn btn-secondary btn-sm">📥 EXPORT EXCEL</a>
             """
         
         html = f"""
-        <html>
-        <head>
-            <title>QuarkTwin Admin</title>
-            <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-        </head>
-        <body class="p-5 bg-light">
-            <div class="container">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                    <h2 style="margin: 0;">Welcome, {session.get('username')} ({session.get('role')})</h2>
-                    <div>
-                        {action_btns}
-                        <a href="/logout" style="background-color: #dc3545; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px;">🔒 LOG OUT</a>
-                    </div>
-                </div>
-                
-                <div class="row mb-4">
-                    <div class="col-md-3"><div class="card bg-primary text-white text-center p-3 shadow-sm"><h5>总询盘</h5><h2 class="mb-0">{total_count}</h2></div></div>
-                    <div class="col-md-3"><div class="card bg-warning text-dark text-center p-3 shadow-sm"><h5>待处理</h5><h2 class="mb-0">{pending_count}</h2></div></div>
-                    <div class="col-md-3"><div class="card bg-success text-white text-center p-3 shadow-sm"><h5>已成交</h5><h2 class="mb-0">{closed_count}</h2></div></div>
-                </div>
-
-                <table class="table table-bordered table-hover bg-white shadow-sm align-middle">
-                    <thead class="table-dark">
-                        <tr><th>ID</th><th>Name</th><th>Email</th><th>Message & Image</th><th>负责人</th><th>状态流转</th><th>AI 操作</th></tr>
-                    </thead>
-                    <tbody>
+        <html><head><title>QuarkTwin Admin</title><link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet"></head>
+        <body class="p-5 bg-light"><div class="container">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2>Welcome, {session.get('username')} ({session.get('role')})</h2>
+            <div>{action_btns}<a href="/logout" class="btn btn-dark btn-sm">🔒 LOG OUT</a></div>
+        </div>
+        <div class="row mb-4">
+            <div class="col-md-4"><div class="card bg-primary text-white text-center p-3"><h5>总询盘</h5><h2>{total_count}</h2></div></div>
+            <div class="col-md-4"><div class="card bg-warning text-dark text-center p-3"><h5>待处理</h5><h2>{pending_count}</h2></div></div>
+            <div class="col-md-4"><div class="card bg-success text-white text-center p-3"><h5>已成交</h5><h2>{closed_count}</h2></div></div>
+        </div>
+        <table class="table table-bordered table-hover bg-white shadow-sm align-middle">
+            <thead class="table-dark"><tr><th>ID</th><th>Name</th><th>Email</th><th>Message & Image</th><th>负责人</th><th>状态流转</th><th>操作</th></tr></thead><tbody>
         """
         for row in rows:
             status = row[4]
@@ -720,7 +714,6 @@ def admin():
                 <option value="Closed" {'selected' if status=='Closed' else ''}>Closed</option>
             </select>
             """
-            
             assigned = row[5]
             if session.get('role') == 'boss':
                 options = ''.join([f"<option value='{u}' {'selected' if assigned==u else ''}>{u}</option>" for u in sales_users])
@@ -732,30 +725,15 @@ def admin():
                 """
             else:
                 assigned_html = f"<span class='badge bg-info text-dark'>{assigned}</span>"
-
-            action_btn = f'<a href="/ai_reply/{row[0]}" style="background-color: #6f42c1; color: white; padding: 6px 12px; text-decoration: none; border-radius: 4px; font-size: 14px; white-space: nowrap; display: inline-block;">🤖 AI 写回复</a>'
-            
-            image_thumb = f'<br><a href="{row[6]}" target="_blank"><img src="{row[6]}" style="max-height: 50px; border-radius: 4px; margin-top: 5px;"></a>' if row[6] else ''
-            
-            html += f"""
-            <tr>
-                <td>{row[0]}</td>
-                <td>{row[1]}</td>
-                <td>{row[2]}</td>
-                <td>{row[3]} {image_thumb}</td>
-                <td>{assigned_html}</td>
-                <td>{status_html}</td>
-                <td>{action_btn}</td>
-            </tr>
-            """
-            
-        html += """
-                    </tbody>
-                </table>
-            </div>
-        </body>
-        </html>
-        """
+                
+            action_btn = f'''
+            <a href="/ai_reply/{row[0]}" class="btn btn-purple btn-sm" style="background-color: #6f42c1; color: white;">🤖 AI 写回复</a>
+            <a href="/admin/follow_up/{row[0]}" class="btn btn-info btn-sm text-dark">📝 跟进</a>
+            '''
+            image_thumb = f'<br><a href="{row[6]}" target="_blank"><img src="{row[6]}" style="max-height: 50px;"></a>' if row[6] else ''
+            html += f"<tr><td>{row[0]}</td><td>{row[1]}</td><td>{row[2]}</td><td>{row[3]} {image_thumb}</td><td>{assigned_html}</td><td>{status_html}</td><td>{action_btn}</td></tr>"
+        
+        html += "</tbody></table></div></body></html>"
         return html
     except Exception as e:
         return f"<h2>Database Error: {str(e)}</h2>", 500
