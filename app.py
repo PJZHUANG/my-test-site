@@ -25,7 +25,7 @@ app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'top_secret_quarktwin_key_20
 limiter = Limiter(
     get_remote_address,
     app=app,
-    default_limits=["200 per day", "50 per hour"],
+    default_limits=[],
     storage_uri="memory://"
 )
 
@@ -131,6 +131,7 @@ def track_order():
 
 # 🚀 AI 客服接口（带防刷限制）
 @app.route('/api/chat', methods=['POST'])
+@limiter.limit("5 per minute")
 def chat():
     data = request.get_json()
     user_message = data.get('message', '')
